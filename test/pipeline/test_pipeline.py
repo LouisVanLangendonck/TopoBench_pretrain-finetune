@@ -4,8 +4,9 @@ import hydra
 from test._utils.simplified_pipeline import run
 
 
-DATASET = "graph/GraphUniverse_CD"                                                 # ADD YOUR DATASET HERE
-MODELS   = ["graph/gcn", "graph/gps"] 
+DATASET = "graph/MUTAG"                                                 # ADD YOUR DATASET HERE
+MODELS   = ["graph/gcn", "cell/topotune", "simplicial/topotune"]        # ADD ONE OR SEVERAL MODELS OF YOUR CHOICE HERE
+
 
 class TestPipeline:
     """Test pipeline for a particular dataset and model."""
@@ -13,7 +14,7 @@ class TestPipeline:
     def setup_method(self):
         """Setup method."""
         hydra.core.global_hydra.GlobalHydra.instance().clear()
-    
+
     def test_pipeline(self):
         """Test pipeline."""
         with hydra.initialize(config_path="../../configs", job_name="job"):

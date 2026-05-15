@@ -23,12 +23,14 @@ class TBModel(LightningModule):
         The backbone wrapper class (default: None).
     feature_encoder : torch.nn.Module, optional
         The feature encoder (default: None).
-    learning_setting: str | None = None,
-        The learning setting (default: None).
     evaluator : Any, optional
         The evaluator class (default: None).
     optimizer : Any, optional
         The optimizer class (default: None).
+    learning_setting : str, optional
+        The learning setting, either "transductive" or "inductive" (default: None).
+        When set to "transductive" alongside task_level "node", train/val/test masks
+        are applied to filter outputs in process_outputs.
     **kwargs : Any
         Additional keyword arguments.
     """
@@ -40,14 +42,14 @@ class TBModel(LightningModule):
         loss: torch.nn.Module,
         backbone_wrapper: torch.nn.Module | None = None,
         feature_encoder: torch.nn.Module | None = None,
-        learning_setting: str | None = None,
         evaluator: Any = None,
         optimizer: Any = None,
+        learning_setting: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__()
 
-        # This line allows to access init params with 'self.hparams' attribute
+        # This line allows accessing init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         # Ignore nn.Module and complex objects to make checkpoints portable
         self.save_hyperparameters(
@@ -84,8 +86,6 @@ class TBModel(LightningModule):
         # Loss function
         self.loss = loss
         self.task_level = self.readout.task_level
-
-        # Learning setting
         self.learning_setting = learning_setting
 
         # Tracking best so far validation accuracy
@@ -180,6 +180,17 @@ class TBModel(LightningModule):
             batch.num_graphs if hasattr(batch, "num_graphs") else 1
         )
 
+        # Update and log metrics
+        loss_value = model_out["loss"].item()
+        self.log(
+            "train/loss",
+            loss_value,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=actual_batch_size,
+        )
+
         # Log optimization objective (avoid naming it train/loss for VGAE — see VGAEEvaluator).
         loss_value = model_out["loss"].item()
         if self._uses_vgae_evaluator():
@@ -221,6 +232,16 @@ class TBModel(LightningModule):
         actual_batch_size = (
             batch.num_graphs if hasattr(batch, "num_graphs") else 1
         )
+        # Log Loss
+        loss_value = model_out["loss"].item()
+        self.log(
+            "val/loss",
+            loss_value,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=actual_batch_size,
+        )
 
         if not self._uses_vgae_evaluator():
             loss_value = model_out["loss"].item()
@@ -251,6 +272,17 @@ class TBModel(LightningModule):
             batch.num_graphs if hasattr(batch, "num_graphs") else 1
         )
 
+        # Log loss
+        loss_value = model_out["loss"].item()
+        self.log(
+            "test/loss",
+            loss_value,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=actual_batch_size,
+        )
+
         if not self._uses_vgae_evaluator():
             loss_value = model_out["loss"].item()
             self.log(
@@ -277,23 +309,8 @@ class TBModel(LightningModule):
         dict
             Dictionary containing the updated model output.
         """
-        # Get the correct mask
-        if self.learning_setting == "transductive":
-            # DGI, GRACE, VGAE (edge minibatch), BGRL: no node-level train/val/test masking
-            # (GraphMAEv2 uses train/val/test splits for evaluation)
-            is_dgi = "x_0_corrupted" in model_out  # DGI
-            is_grace = "z_1" in model_out and "z_2" in model_out  # GRACE
-            is_vgae_edges = (
-                "pos_edge_index" in model_out and "neg_edge_index" in model_out
-            )
-            is_bgrl = (
-                "pred_h_1" in model_out and "target_h_2" in model_out
-            )  # BGRL
-
-            if is_dgi or is_grace or is_vgae_edges or is_bgrl:
-                # Skip masking for self-supervised pre-training outputs
-                return model_out
-
+        if self.task_level == "node" and self.learning_setting == "transductive":
+            # Get the correct mask
             if self.state_str == "Training":
                 mask = batch.train_mask
             elif self.state_str == "Validation":
@@ -302,8 +319,8 @@ class TBModel(LightningModule):
                 mask = batch.test_mask
             else:
                 raise ValueError("Invalid state_str")
-
-            # Filter Outputs and labels according to mask
+            
+            # Keep only train data points
             for key, val in model_out.items():
                 if key in ["logits", "labels"]:
                     model_out[key] = val[mask]

@@ -29,7 +29,7 @@ readout:
   readout_name: NoReadOut
   hidden_dim: ${model.backbone.out_channels}
   out_channels: ${model.backbone.out_channels}
-  task_level: ${dataset.parameters.task_level}
+  task_level: ${define_task_level:${dataset.parameters.task_level},${dataset.split_params.learning_setting}} # Handles the edge case of node-inductive task
   pooling_type: sum
   logits_linear_layer: false
 

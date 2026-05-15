@@ -89,6 +89,9 @@ tutorials/lightning_logs/*
 tutorials/checkpoints
 tutorials/checkpoints/*
 
+# GraphUniverse challenge notebook outputs (JSON + figures)
+2026_tdl_challenge/outputs/
+
 # IPython
 profile_default/
 ipython_config.py
@@ -177,6 +180,7 @@ cython_debug/
 # Data
 /datasets/
 /data/
+!topobench/data/
 /outputs/
 /notebooks/*.csv
 notebooks/tmp

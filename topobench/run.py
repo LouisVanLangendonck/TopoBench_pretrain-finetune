@@ -13,7 +13,7 @@ from lightning import Callback, LightningModule, Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import Logger
 from lightning.pytorch.loggers.wandb import WandbLogger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from topobench.data.preprocessor import PreProcessor
 from topobench.dataloader import TBDataloader
@@ -26,23 +26,7 @@ from topobench.utils import (
     log_hyperparameters,
     task_wrapper,
 )
-from topobench.utils.config_resolvers import (
-    get_default_metrics,
-    get_default_trainer,
-    get_default_transform,
-    get_flattened_channels,
-    get_monitor_metric,
-    get_monitor_mode,
-    get_non_relational_out_channels,
-    get_pretraining_evaluator,
-    get_pretraining_loss,
-    get_pretraining_transform,
-    get_raw_feature_dim,
-    get_required_lifting,
-    infer_in_channels,
-    infer_num_cell_dimensions,
-    infer_topotune_num_cell_dimensions,
-)
+from topobench.utils.config_resolvers import register_all_resolvers
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -63,60 +47,8 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
 
 
-OmegaConf.register_new_resolver(
-    "get_default_metrics", get_default_metrics, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_default_trainer", get_default_trainer, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_default_transform", get_default_transform, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_pretraining_transform", get_pretraining_transform, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_pretraining_loss", get_pretraining_loss, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_pretraining_evaluator", get_pretraining_evaluator, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_flattened_channels",
-    get_flattened_channels,
-    replace=True,
-)
-OmegaConf.register_new_resolver(
-    "get_required_lifting", get_required_lifting, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_monitor_metric", get_monitor_metric, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_monitor_mode", get_monitor_mode, replace=True
-)
-OmegaConf.register_new_resolver(
-    "get_non_relational_out_channels",
-    get_non_relational_out_channels,
-    replace=True,
-)
-OmegaConf.register_new_resolver(
-    "infer_in_channels", infer_in_channels, replace=True
-)
-OmegaConf.register_new_resolver(
-    "infer_num_cell_dimensions", infer_num_cell_dimensions, replace=True
-)
-OmegaConf.register_new_resolver(
-    "infer_topotune_num_cell_dimensions",
-    infer_topotune_num_cell_dimensions,
-    replace=True,
-)
-OmegaConf.register_new_resolver(
-    "get_raw_feature_dim", get_raw_feature_dim, replace=True
-)
-OmegaConf.register_new_resolver(
-    "parameter_multiplication", lambda x, y: int(int(x) * int(y)), replace=True
-)
+# Register custom resolvers before Hydra initialization
+register_all_resolvers()
 
 
 def initialize_hydra() -> DictConfig:
@@ -185,11 +117,8 @@ def run(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     log.info("Instantiating preprocessor...")
     transform_config = cfg.get("transforms", None)
     preprocessor = PreProcessor(dataset, dataset_dir, transform_config)
-    task_level = cfg.dataset.parameters.get("task_level", None)
     dataset_train, dataset_val, dataset_test = (
-        preprocessor.load_dataset_splits(
-            cfg.dataset.split_params, task_level=task_level
-        )
+        preprocessor.load_dataset_splits(cfg.dataset.split_params)
     )
     # Prepare datamodule
     log.info("Instantiating datamodule...")
@@ -208,9 +137,9 @@ def run(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     model: LightningModule = hydra.utils.instantiate(
         cfg.model,
         evaluator=cfg.evaluator,
-        learning_setting=cfg.dataset.split_params.learning_setting,
         optimizer=cfg.optimizer,
         loss=cfg.loss,
+        learning_setting=cfg.dataset.split_params.get("learning_setting", None),
     )
 
     log.info("Instantiating callbacks...")

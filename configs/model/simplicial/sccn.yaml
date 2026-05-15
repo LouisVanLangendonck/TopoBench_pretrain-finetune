@@ -30,7 +30,7 @@ readout:
   num_cell_dimensions: ${infer_num_cell_dimensions:${oc.select:model.feature_encoder.selected_dimensions,null},${model.feature_encoder.in_channels}} # The highest order of cell dimensions to consider
   hidden_dim: ${model.feature_encoder.out_channels}
   out_channels: ${dataset.parameters.num_classes}
-  task_level: ${dataset.parameters.task_level}
+  task_level: ${define_task_level:${dataset.parameters.task_level},${dataset.split_params.learning_setting}} # Handles the edge case of node-inductive task
   pooling_type: sum
 
 # compile model for faster training with pytorch 2.0
