@@ -4,11 +4,7 @@ Two-step pipeline: **one project at a time**, then **merge**.
 
 ## 1. Project list
 
-Edit `wandb_projects_list.json` — a JSON array of W&B project names, e.g.:
-
-```json
-["finetune_gin_pretrain_sweep_dgi_MUTAG", "..."]
-```
+Edit `WANDB_PROJECTS` at the top of `run_all.py` — comment lines in/out to include or skip projects.
 
 ## 2. Per-project processing (`process_project.py`)
 
