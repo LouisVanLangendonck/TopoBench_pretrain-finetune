@@ -4,13 +4,16 @@ Aggregates fine-tuning W&B runs into analysis-ready CSVs before plotting.
 
 ## Pipeline
 
-1. **Fetch** all runs from `finetune_<pretrain_project>` (defaults from `scripts/finetuning/sweep_config.yaml`).
+Processing runs **per W&B project** (then merges at the end). That way older graphmaev2 projects with extra swept params do not break column detection in newer projects; merged CSVs simply have NaN where a column did not apply.
+
+1. **Fetch** runs from each `finetune_<pretrain_project>` separately.
 2. **Group** by every finetuning + pretraining hyperparameter except `ft_train_seed`.
 3. **Validate seeds** — each group must contain exactly the seeds in `train_seeds` (default `0, 1, 2`). Other groups go to `finetune_flagged_groups.csv`.
 4. **Aggregate** test metrics (`test/*`) with mean and std across seeds.
-5. **Detect varied hyperparameters** — constant columns are dropped from the slim table.
+5. **Detect varied hyperparameters** within that project — constant columns are dropped from the slim table.
 6. **Rename** pretraining-specific swept params as `{method}_param_{name}` (see `gin_pretrain_sweep.sh`).
 7. **Select best** — for each `(dataset, pretraining_method, gin_hidden, gin_num_layers, weight_decay, learning_rate, ft_mode, ft_fraction)`, keep the row with the best **mean** test monitor metric (max for AUROC/accuracy, min for MAE/MSE).
+8. **Merge** per-project tables into the final CSVs (outer union of columns).
 
 ## Usage
 

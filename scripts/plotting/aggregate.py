@@ -15,6 +15,7 @@ from scripts.plotting.defaults import (
     METHOD_SWEPT_KEYS,
     NON_HYPERPARAM_COLUMNS,
     NON_HYPERPARAM_PREFIXES,
+    PRETRAIN_CONFIG_TO_CANONICAL,
     SELECTION_GROUP_KEYS,
     SHARED_COLUMN_NAMES,
     SHARED_SWEPT_KEYS,
@@ -41,20 +42,62 @@ except ImportError:  # pragma: no cover
 
 def fetch_finetune_runs(
     entity: str,
-    projects: Iterable[str],
+    project: str,
     *,
     state: str = "finished",
 ) -> list[Any]:
-    """Fetch all runs from the given finetune W&B projects."""
+    """Fetch all runs from one finetune W&B project."""
     api = wandb.Api()
-    runs: list[Any] = []
-    for project in projects:
-        path = f"{entity}/{project}"
-        filters = {"state": state} if state else None
-        batch = list(api.runs(path, filters=filters))
-        print(f"  {path}: {len(batch)} run(s)")
-        runs.extend(batch)
-    return runs
+    path = f"{entity}/{project}"
+    filters = {"state": state} if state else None
+    batch = list(api.runs(path, filters=filters))
+    print(f"  {path}: {len(batch)} run(s)")
+    return batch
+
+
+def dedupe_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Coalesce duplicate column names (bfill across duplicate blocks)."""
+    if df.empty or df.columns.is_unique:
+        return df
+    coalesced: dict[str, pd.Series] = {}
+    for name in pd.Index(df.columns).unique():
+        block = df.loc[:, name]
+        if isinstance(block, pd.Series):
+            coalesced[name] = block
+        else:
+            coalesced[name] = block.bfill(axis=1).iloc[:, 0]
+    return pd.DataFrame(coalesced)
+
+
+def drop_redundant_pretrain_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop ``pretrained_config_*`` keys when an equivalent canonical column exists."""
+    drop: list[str] = []
+    for pretrain_col, canon in PRETRAIN_CONFIG_TO_CANONICAL.items():
+        if pretrain_col in df.columns and canon in df.columns:
+            drop.append(pretrain_col)
+    if drop:
+        df = df.drop(columns=drop)
+    return df
+
+
+def _safe_column_nunique(df: pd.DataFrame, col: str) -> int:
+    """Return nunique for *col*, safe when duplicate labels exist in ``df.columns``."""
+    if col not in df.columns:
+        return 0
+    block = df.loc[:, col]
+    if isinstance(block, pd.DataFrame):
+        block = block.bfill(axis=1).iloc[:, 0]
+    return int(block.nunique(dropna=True))
+
+
+def merge_project_dataframes(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """Outer-union concat of per-project tables (missing cols → NaN)."""
+    frames = [f for f in frames if f is not None and not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    if len(frames) == 1:
+        return frames[0].copy()
+    return pd.concat(frames, axis=0, ignore_index=True, sort=False)
 
 
 def _flatten_config(cfg: dict, prefix: str = "", sep: str = ".") -> dict[str, Any]:
@@ -168,15 +211,14 @@ def run_to_record(run: Any, project: str) -> dict[str, Any]:
     return record
 
 
-def build_raw_runs_dataframe(runs: list[Any], project_by_run: dict[str, str]) -> pd.DataFrame:
+def build_raw_runs_dataframe(runs: list[Any], project: str) -> pd.DataFrame:
     """Build a DataFrame with one row per W&B run."""
-    records = [
-        run_to_record(r, project_by_run.get(r.id, r.project))
-        for r in runs
-    ]
+    records = [run_to_record(r, project) for r in runs]
     if not records:
         return pd.DataFrame()
-    return pd.DataFrame.from_records(records)
+    df = pd.DataFrame.from_records(records)
+    df = drop_redundant_pretrain_columns(df)
+    return dedupe_dataframe_columns(df)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -203,7 +245,7 @@ def _is_hyperparam_column(col: str, df: pd.DataFrame) -> bool:
 def grouping_columns(df: pd.DataFrame) -> list[str]:
     """Columns that define a unique hyperparameter setting (excluding train seed)."""
     cols = []
-    for c in df.columns:
+    for c in pd.Index(df.columns).unique():
         if not _is_hyperparam_column(c, df):
             continue
         if c == "ft_train_seed":
@@ -230,10 +272,10 @@ def aggregate_seed_groups(
     if df.empty:
         return df, pd.DataFrame()
 
+    df = dedupe_dataframe_columns(df)
     expected_set = {int(s) for s in expected_seeds}
-    n_expected = len(expected_set)
 
-    test_cols = [c for c in df.columns if c.startswith("test/")]
+    test_cols = [c for c in pd.Index(df.columns).unique() if c.startswith("test/")]
     group_cols = grouping_columns(df)
     passthrough_cols = [
         c for c in (
@@ -300,13 +342,12 @@ def detect_varied_columns(
     """Return hyperparameter columns with more than one distinct value."""
     exclude_set = set(exclude or ())
     varied = []
-    for col in df.columns:
+    for col in pd.Index(df.columns).unique():
         if col in exclude_set:
             continue
         if not _is_hyperparam_column(col, df):
             continue
-        nunique = df[col].nunique(dropna=True)
-        if nunique > 1:
+        if _safe_column_nunique(df, col) > 1:
             varied.append(col)
     return varied
 
@@ -365,8 +406,19 @@ def rename_hyperparam_columns(
             rename_map[col] = col
 
     out = df.copy()
-    out = out.rename(columns={k: v for k, v in rename_map.items() if k in out.columns})
-    return out
+    applied: dict[str, str] = {}
+    existing = set(out.columns)
+    for src, tgt in rename_map.items():
+        if src not in out.columns:
+            continue
+        if tgt in existing and tgt != src:
+            out = out.drop(columns=[src])
+            continue
+        applied[src] = tgt
+        existing.add(tgt)
+    if applied:
+        out = out.rename(columns=applied)
+    return dedupe_dataframe_columns(out)
 
 
 def slim_to_varied_hyperparams(
@@ -455,28 +507,34 @@ def select_best_hyperparams(agg_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# End-to-end pipeline
+# End-to-end pipeline (per project, then merge)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def process_finetune_projects(
+def process_single_finetune_project(
     entity: str,
-    projects: list[str],
+    project: str,
     *,
     expected_seeds: list[int] | None = None,
     state: str = "finished",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Full pipeline: fetch → seed aggregate → rename → select best.
+    """Run the full pipeline on one W&B project.
+
+    Varied hyperparameters are detected **within** this project only, so older
+    graphmaev2 sweeps with extra knobs do not affect column detection elsewhere.
 
     Returns
     -------
     final_df, seed_aggregated_df, flagged_df
     """
-    runs = fetch_finetune_runs(entity, projects, state=state)
-    project_by_run = {r.id: r.project for r in runs}
-    raw = build_raw_runs_dataframe(runs, project_by_run)
-
     seeds = expected_seeds if expected_seeds is not None else [0, 1, 2]
+    runs = fetch_finetune_runs(entity, project, state=state)
+    if not runs:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    raw = build_raw_runs_dataframe(runs, project)
     agg, flagged = aggregate_seed_groups(raw, seeds)
+    if agg.empty:
+        return pd.DataFrame(), agg, flagged
 
     varied = detect_varied_columns(agg)
     renamed = rename_hyperparam_columns(agg, varied)
@@ -485,6 +543,42 @@ def process_finetune_projects(
         if not c.startswith("test/") and c not in NON_HYPERPARAM_COLUMNS
     ]
     slim = slim_to_varied_hyperparams(renamed, varied_renamed)
-
     final = select_best_hyperparams(slim)
     return final, renamed, flagged
+
+
+def process_finetune_projects(
+    entity: str,
+    projects: list[str],
+    *,
+    expected_seeds: list[int] | None = None,
+    state: str = "finished",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Process each W&B project independently, then merge CSV-ready tables.
+
+    Returns
+    -------
+    final_df, seed_aggregated_df, flagged_df
+    """
+    finals: list[pd.DataFrame] = []
+    aggs: list[pd.DataFrame] = []
+    flags: list[pd.DataFrame] = []
+
+    for i, project in enumerate(projects, start=1):
+        print(f"\n── [{i}/{len(projects)}] {project}")
+        final, agg, flagged = process_single_finetune_project(
+            entity, project, expected_seeds=expected_seeds, state=state,
+        )
+        print(
+            f"     aggregated={len(agg)}  flagged={len(flagged)}  "
+            f"selected={len(final)}"
+        )
+        finals.append(final)
+        aggs.append(agg)
+        flags.append(flagged)
+
+    return (
+        merge_project_dataframes(finals),
+        merge_project_dataframes(aggs),
+        merge_project_dataframes(flags),
+    )

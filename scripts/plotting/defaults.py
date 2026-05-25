@@ -57,6 +57,11 @@ SHARED_COLUMN_NAMES: dict[str, str] = {
     "dataset.split_params.data_seed": "pretrain_data_seed",
 }
 
+# Flattened W&B keys duplicated by canonical columns set in run_to_record()
+PRETRAIN_CONFIG_TO_CANONICAL: dict[str, str] = {
+    f"pretrained_config_{k}": v for k, v in SHARED_COLUMN_NAMES.items()
+}
+
 METHOD_PARAM_SHORT_NAMES: dict[str, str] = {
     "model.backbone_wrapper.drop_edge_rate_2": "drop_edge_rate_2",
     "model.backbone_wrapper.drop_feature_rate_2": "drop_feature_rate_2",

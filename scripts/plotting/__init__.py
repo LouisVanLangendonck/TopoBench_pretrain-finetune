@@ -5,6 +5,9 @@ from scripts.plotting.aggregate import (
     build_raw_runs_dataframe,
     detect_varied_columns,
     fetch_finetune_runs,
+    merge_project_dataframes,
+    process_finetune_projects,
+    process_single_finetune_project,
     rename_hyperparam_columns,
     select_best_hyperparams,
 )
@@ -14,6 +17,9 @@ __all__ = [
     "build_raw_runs_dataframe",
     "detect_varied_columns",
     "fetch_finetune_runs",
+    "merge_project_dataframes",
+    "process_finetune_projects",
+    "process_single_finetune_project",
     "rename_hyperparam_columns",
     "select_best_hyperparams",
 ]
