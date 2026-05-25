@@ -10,15 +10,15 @@ model_checkpoint:
   dirpath: ${paths.output_dir}/checkpoints
   filename: "epoch_{epoch:03d}"
   monitor: ${get_monitor_metric:${dataset.parameters.task},${dataset.parameters.monitor_metric}}
-  mode: "${get_monitor_mode:${dataset.parameters.task}}"
+  mode: "${get_monitor_mode:${dataset.parameters.task},${dataset.parameters.monitor_metric}}"
   save_last: False
   auto_insert_metric_name: False
   save_weights_only: False
 
 early_stopping:
   monitor: ${get_monitor_metric:${dataset.parameters.task},${dataset.parameters.monitor_metric}}
-  patience: 25
-  mode: "${get_monitor_mode:${dataset.parameters.task}}"
+  patience: 20
+  mode: "${get_monitor_mode:${dataset.parameters.task},${dataset.parameters.monitor_metric}}"
 
 model_summary:
   max_depth: -1
