@@ -1,56 +1,53 @@
-# Fine-tuning results: W&B → CSV
+# Fine-tuning W&B → CSV
 
-Aggregates fine-tuning W&B runs into analysis-ready CSVs before plotting.
+Two-step pipeline: **one project at a time**, then **merge**.
 
-## Pipeline
+## 1. Project list
 
-Processing runs **per W&B project** (then merges at the end). That way older graphmaev2 projects with extra swept params do not break column detection in newer projects; merged CSVs simply have NaN where a column did not apply.
+Edit `wandb_projects_list.json` — a JSON array of W&B project names, e.g.:
 
-1. **Fetch** runs from each `finetune_<pretrain_project>` separately.
-2. **Group** by every finetuning + pretraining hyperparameter except `ft_train_seed`.
-3. **Validate seeds** — each group must contain exactly the seeds in `train_seeds` (default `0, 1, 2`). Other groups go to `finetune_flagged_groups.csv`.
-4. **Aggregate** test metrics (`test/*`) with mean and std across seeds.
-5. **Detect varied hyperparameters** within that project — constant columns are dropped from the slim table.
-6. **Rename** pretraining-specific swept params as `{method}_param_{name}` (see `gin_pretrain_sweep.sh`).
-7. **Select best** — for each `(dataset, pretraining_method, gin_hidden, gin_num_layers, weight_decay, learning_rate, ft_mode, ft_fraction)`, keep the row with the best **mean** test monitor metric (max for AUROC/accuracy, min for MAE/MSE).
-8. **Merge** per-project tables into the final CSVs (outer union of columns).
+```json
+["finetune_gin_pretrain_sweep_dgi_MUTAG", "..."]
+```
 
-## Usage
+## 2. Per-project processing (`process_project.py`)
+
+For a single project only:
+
+1. Load all runs from W&B.
+2. Drop columns that never change across runs, **except**:
+   - `pretrained_config_dataset.loader.parameters.data_name`
+   - `pretrained_config_model.model_name`
+   - `pretrained_config_pretraining.task`
+3. Group by every other hyperparameter column except `ft_train_seed`.
+4. Require exactly 3 training seeds per group (default `0, 1, 2`); flag mismatches to `*_flagged.csv`.
+5. Average `test/*` → `*_mean` / `*_std`.
+6. For each **(dataset, model, pretraining task, ft_mode, ft_fraction)**, keep the row with the best mean test monitor metric; drop the rest.
+7. Save `outputs/processed_projects/<project>.csv` (leading columns: dataset, model, pretraining, `ft_mode`, `ft_fraction`).
 
 ```bash
-# Defaults: all projects in sweep_config.yaml → finetune_* projects
-python scripts/plotting/process_to_csv.py
-
-# Custom output directory
-python scripts/plotting/process_to_csv.py --output-dir results/plotting
-
-# Subset of projects
-python scripts/plotting/process_to_csv.py \
-  --projects finetune_gin_pretrain_sweep_dgi_MUTAG
-
-# Preview project list
-python scripts/plotting/process_to_csv.py --dry-run
+python scripts/plotting/process_project.py \
+  --entity louis-van-langendonck-universitat-polit-cnica-de-catalunya \
+  --project finetune_gin_pretrain_sweep_dgi_MUTAG
 ```
 
-## Outputs
+## 3. Combine (`combine_results.py`)
 
-| File | Description |
-|------|-------------|
-| `finetune_best_hyperparams.csv` | One row per (dataset, method, arch, mode, fraction) after best hyperparam selection |
-| `finetune_seed_aggregated.csv` | All valid seed-aggregated groups (before selection) |
-| `finetune_flagged_groups.csv` | Groups with wrong seed count |
-| `finetune_summary.txt` | Run counts |
+Merge all `outputs/processed_projects/*.csv` (not `*_flagged.csv`):
 
-## Library use
+- Same column name → one column.
+- Column only in some projects → kept with NaN elsewhere.
 
-```python
-from scripts.plotting.aggregate import process_finetune_projects
-from scripts.plotting.defaults import load_finetune_sweep_defaults
-
-defaults = load_finetune_sweep_defaults()
-final, aggregated, flagged = process_finetune_projects(
-    defaults["entity"],
-    defaults["finetune_projects"],
-    expected_seeds=defaults["train_seeds"],
-)
+```bash
+python scripts/plotting/combine_results.py
+# → outputs/aggregated_results.csv
 ```
+
+## 4. Run everything (`run_all.py`)
+
+```bash
+python scripts/plotting/run_all.py \
+  --entity louis-van-langendonck-universitat-polit-cnica-de-catalunya
+```
+
+Use `--skip-combine` to only write per-project files.
