@@ -28,13 +28,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import wandb
+import yaml
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from scripts.plotting.wb_table import (
-    ALWAYS_KEEP_COLUMNS,
     SEED_COLUMN,
     SELECTION_KEY_COLUMNS,
     dedupe_columns,
@@ -42,13 +42,53 @@ from scripts.plotting.wb_table import (
     flatten_config,
     is_hyperparam_column,
     is_metric_column,
-    monitor_info_from_row,
     normalize_value,
     order_columns,
-    safe_nunique,
 )
 
 DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "outputs" / "processed_projects"
+
+# Project name convention: finetune_{model}_pretrain_sweep_{pretraining_method}_{dataset_name}
+_PROJECT_NAME_RE = re.compile(r"^finetune_[^_]+_pretrain_sweep_[^_]+_(.+)$")
+
+
+def load_dataset_monitor_info(
+    config_root: Path | None = None,
+) -> dict[str, tuple[str, str]]:
+    """Scan configs/dataset/graph/*.yaml and return {data_name: (task, monitor_metric)}.
+
+    This is the ground-truth fallback for when W&B runs didn't log these fields.
+    """
+    root = config_root or _PROJECT_ROOT
+    result: dict[str, tuple[str, str]] = {}
+    graph_cfg_dir = root / "configs" / "dataset" / "graph"
+    if not graph_cfg_dir.is_dir():
+        return result
+    for p in graph_cfg_dir.glob("*.yaml"):
+        try:
+            cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        params = cfg.get("parameters", {}) or {}
+        loader_params = (cfg.get("loader", {}) or {}).get("parameters", {}) or {}
+        data_name = loader_params.get("data_name")
+        task = params.get("task")
+        monitor_metric = params.get("monitor_metric")
+        if data_name and task and monitor_metric:
+            result[str(data_name)] = (str(task), str(monitor_metric))
+    return result
+
+
+def extract_finetune_dataset_name(project: str) -> str | None:
+    """Parse the finetuning dataset name out of the W&B project name.
+
+    Convention: finetune_{model}_pretrain_sweep_{pretraining_method}_{dataset_name}
+    Examples:
+      finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY  -> IMDB-BINARY
+      finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ  -> Clearance_Hepatocyte_AZ
+    """
+    m = _PROJECT_NAME_RE.match(project)
+    return m.group(1) if m else None
 
 
 def sanitize_filename(project: str) -> str:
@@ -98,17 +138,58 @@ def hyperparam_group_columns(df: pd.DataFrame) -> list[str]:
     ]
 
 
+def _derive_mode(task: str, metric: str) -> str:
+    mode = "max"
+    try:
+        from topobench.utils.config_resolvers import get_monitor_mode
+        mode = get_monitor_mode(task, metric)
+    except Exception:
+        ml = metric.lower()
+        if "loss" in ml or "mae" in ml or "mse" in ml or task == "regression":
+            mode = "min"
+    return mode
+
+
+def _resolve_monitor_info(
+    finetune_data_name: str | None,
+    dataset_monitor_info: dict[str, tuple[str, str]],
+) -> tuple[str | None, str | None, str]:
+    """Return (task, monitor_metric, mode) for the finetuning evaluation.
+
+    Primary source: local configs/dataset/graph/{data_name}.yaml (authoritative,
+    independent of what the W&B run config logged).
+    The pretrained_config_* fields in the run describe the PRETRAIN setup, not the
+    finetuning evaluation, so we deliberately ignore them here.
+    """
+    if finetune_data_name:
+        info = dataset_monitor_info.get(finetune_data_name)
+        if info is not None:
+            task_fb, metric_fb = info
+            return task_fb, metric_fb, _derive_mode(task_fb, metric_fb)
+    return None, None, "max"
+
+
 def aggregate_seeds(
     df: pd.DataFrame,
     expected_seeds: set[int],
+    dataset_monitor_info: dict[str, tuple[str, str]] | None = None,
+    finetune_data_name: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (valid aggregated groups, flagged groups)."""
     if df.empty:
         return df, pd.DataFrame()
 
+    _dmi = dataset_monitor_info or {}
     df = dedupe_columns(df)
     test_cols = [c for c in df.columns if c.startswith("test/")]
     group_cols = hyperparam_group_columns(df)
+
+    task, metric, mode = _resolve_monitor_info(finetune_data_name, _dmi)
+    print(f"  [debug] finetune_data_name={finetune_data_name!r}  "
+          f"monitor → task={task!r}  metric={metric!r}  mode={mode!r}")
+    print(f"  [debug] test cols in data: {test_cols}")
+    print(f"  [debug] n_groups={df.groupby(group_cols, dropna=False).ngroups}  "
+          f"expected_seeds={sorted(expected_seeds)}")
 
     valid_rows: list[dict[str, Any]] = []
     flagged_rows: list[dict[str, Any]] = []
@@ -136,8 +217,6 @@ def aggregate_seeds(
 
         row = dict(base)
         row["n_runs"] = len(grp)
-        sample = grp.iloc[0]
-        task, metric, mode = monitor_info_from_row(sample)
         row["monitor_task"] = task
         row["monitor_metric"] = metric
         row["monitor_mode"] = mode
@@ -152,6 +231,7 @@ def aggregate_seeds(
 
         valid_rows.append(row)
 
+    print(f"  [debug] valid_groups={len(valid_rows)}  flagged_groups={len(flagged_rows)}")
     return pd.DataFrame(valid_rows), pd.DataFrame(flagged_rows)
 
 
@@ -180,6 +260,15 @@ def select_best_rows(agg: pd.DataFrame) -> pd.DataFrame:
             candidates.append((float(val), row))
 
         if not candidates:
+            # Debug: show why first failing group has no candidates (once only).
+            if not picked:
+                sample_row = next(grp.iterrows())[1]
+                tc = sample_row.get("monitor_test_column")
+                mc = f"{tc}_mean" if tc else None
+                print(f"  [debug:select] first empty-candidate group: "
+                      f"monitor_test_column={tc!r}  "
+                      f"mean_col_present={mc in sample_row.index if mc else False}  "
+                      f"available_mean_cols={[c for c in sample_row.index if c.endswith('_mean')][:5]}")
             continue
 
         mode = str(grp["monitor_mode"].iloc[0]) if "monitor_mode" in grp.columns else "max"
@@ -208,13 +297,19 @@ def process_project(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Full per-project pipeline. Returns (selected, flagged)."""
     seeds = set(expected_seeds or [0, 1, 2])
+    dmi = load_dataset_monitor_info()
+    ft_data_name = extract_finetune_dataset_name(project)
+    print(f"  [debug] extracted finetune dataset name from project: {ft_data_name!r}")
+    print(f"  [debug] known datasets in local configs: {sorted(dmi.keys())}")
     runs = fetch_runs(entity, project, state=state)
     raw = build_raw_table(runs, project)
     if raw.empty:
         return pd.DataFrame(), pd.DataFrame()
 
     pruned = drop_constant_columns(raw)
-    agg, flagged = aggregate_seeds(pruned, seeds)
+    agg, flagged = aggregate_seeds(
+        pruned, seeds, dataset_monitor_info=dmi, finetune_data_name=ft_data_name,
+    )
     selected = select_best_rows(agg)
 
     out_dir = output_dir or DEFAULT_OUTPUT_DIR

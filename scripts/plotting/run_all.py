@@ -27,26 +27,57 @@ DEFAULT_COMBINED = _SCRIPT_DIR / "outputs" / "aggregated_results.csv"
 
 # ── W&B finetune projects (comment out any you want to skip) ─────────────────
 WANDB_PROJECTS: list[str] = [
-    "finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY",
-    "finetune_gin_pretrain_sweep_graphmaev2_MUTAG",
-    "finetune_gin_pretrain_sweep_graphmaev2_PROTEINS",
-    "finetune_gin_pretrain_sweep_graphmaev2_Caco2_Wang",
-    "finetune_gin_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ",
-    "finetune_gin_pretrain_sweep_graphmaev2_ogbg-molbace",
-    "finetune_gin_pretrain_sweep_dgi_IMDB-BINARY",
-    "finetune_gin_pretrain_sweep_dgi_MUTAG",
-    "finetune_gin_pretrain_sweep_dgi_PROTEINS",
-    "finetune_gin_pretrain_sweep_dgi_Caco2_Wang",
-    "finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ",
-    "finetune_gin_pretrain_sweep_dgi_ogbg-molbace",
+    # "finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY",
+    # "finetune_gin_pretrain_sweep_graphmaev2_MUTAG",
+    # "finetune_gin_pretrain_sweep_graphmaev2_PROTEINS",
+    # "finetune_gin_pretrain_sweep_graphmaev2_Caco2_Wang",
+    # "finetune_gin_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ",
+    # "finetune_gin_pretrain_sweep_graphmaev2_ogbg-molbace",
+    # "finetune_gin_pretrain_sweep_dgi_IMDB-BINARY",
+    # "finetune_gin_pretrain_sweep_dgi_MUTAG",
+    # "finetune_gin_pretrain_sweep_dgi_PROTEINS",
+    # "finetune_gin_pretrain_sweep_dgi_Caco2_Wang",
+    # "finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ",
+    # "finetune_gin_pretrain_sweep_dgi_ogbg-molbace",
+    # "finetune_gin_pretrain_sweep_graphcl_IMDB-BINARY",
     # "finetune_gin_pretrain_sweep_graphcl_MUTAG",
+    # "finetune_gin_pretrain_sweep_graphcl_PROTEINS",
+    # "finetune_gin_pretrain_sweep_graphcl_Caco2_Wang",
+    # "finetune_gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ",
+    # "finetune_gin_pretrain_sweep_graphcl_ogbg-molbace",
+    # "finetune_gin_pretrain_sweep_bgrl_IMDB-BINARY",
+    # "finetune_gin_pretrain_sweep_bgrl_MUTAG",
+    # "finetune_gin_pretrain_sweep_bgrl_PROTEINS",
+    # "finetune_gin_pretrain_sweep_bgrl_Caco2_Wang",
+    # "finetune_gin_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ",
+    # "finetune_gin_pretrain_sweep_bgrl_ogbg-molbace",
+    # "finetune_gin_pretrain_sweep_vgae_IMDB-BINARY",
     # "finetune_gin_pretrain_sweep_vgae_MUTAG",
+    # "finetune_gin_pretrain_sweep_vgae_PROTEINS",
+    # "finetune_gin_pretrain_sweep_vgae_Caco2_Wang",
+    # "finetune_gin_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ",
+    # "finetune_gin_pretrain_sweep_vgae_ogbg-molbace",
+    "finetune_gin_pretrain_sweep_bgrl_BBB_Martins",
+    "finetune_gin_pretrain_sweep_bgrl_CYP3A4_Veith",
+    "finetune_gin_pretrain_sweep_bgrl_ogbg-molhiv",
+    "finetune_gin_pretrain_sweep_graphmaev2_BBB_Martins",
+    "finetune_gin_pretrain_sweep_graphmaev2_CYP3A4_Veith",
+    "finetune_gin_pretrain_sweep_graphmaev2_ogbg-molhiv",
+    "finetune_gin_pretrain_sweep_dgi_BBB_Martins",
+    "finetune_gin_pretrain_sweep_dgi_CYP3A4_Veith",
+    "finetune_gin_pretrain_sweep_dgi_ogbg-molhiv",
+    "finetune_gin_pretrain_sweep_graphcl_BBB_Martins",
+    "finetune_gin_pretrain_sweep_graphcl_CYP3A4_Veith",
+    "finetune_gin_pretrain_sweep_graphcl_ogbg-molhiv",
+    "finetune_gin_pretrain_sweep_vgae_BBB_Martins",
+    "finetune_gin_pretrain_sweep_vgae_CYP3A4_Veith",
+    "finetune_gin_pretrain_sweep_vgae_ogbg-molhiv",
 ]
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Process all projects then combine CSVs.")
-    p.add_argument("--entity", required=True, help="W&B entity.")
+    p.add_argument("--entity", default="louis-van-langendonck-universitat-polit-cnica-de-catalunya", help="W&B entity.")
     p.add_argument("--train-seeds", nargs="+", type=int, default=[0, 1, 2])
     p.add_argument("--state", default="finished", help="W&B state filter (empty = all).")
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)

@@ -39,7 +39,16 @@ def combine_processed_csvs(
     if not paths:
         raise FileNotFoundError(f"No processed CSV files in {input_dir}")
 
-    frames = [pd.read_csv(p) for p in paths]
+    frames = []
+    for p in paths:
+        try:
+            df = pd.read_csv(p)
+        except pd.errors.EmptyDataError:
+            continue
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        raise FileNotFoundError(f"All processed CSV files in {input_dir} are empty.")
     combined = pd.concat(frames, axis=0, ignore_index=True, sort=False)
     combined = order_columns(combined)
     output_path.parent.mkdir(parents=True, exist_ok=True)
