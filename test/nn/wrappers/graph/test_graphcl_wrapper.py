@@ -506,3 +506,17 @@ class TestGraphCLAugmentationVariants:
     def test_invalid_subgraph_ratio_raises(self):
         with pytest.raises(ValueError, match="subgraph_ratio_meaning"):
             self._make_wrapper(subgraph_ratio_meaning="invalid")
+
+    def test_residual_connections_respected(self):
+        """residual_connections must not be forced off; z1/z2 use post-residual nodes."""
+        wrapper_off = self._make_wrapper(residual_connections=False)
+        wrapper_on = self._make_wrapper(residual_connections=True)
+        assert wrapper_off.residual_connections is False
+        assert wrapper_on.residual_connections is True
+
+        batch = _make_batch(num_graphs=4, num_nodes=12, num_features=16, num_edges=30)
+        torch.manual_seed(0)
+        out_off = wrapper_off(batch)
+        torch.manual_seed(0)
+        out_on = wrapper_on(batch)
+        assert not torch.allclose(out_off["z1"], out_on["z1"])

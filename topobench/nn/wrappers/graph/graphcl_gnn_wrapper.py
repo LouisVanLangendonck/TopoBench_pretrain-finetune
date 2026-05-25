@@ -61,6 +61,10 @@ class GraphCLGNNWrapper(AbstractWrapper):
           (``unsupervised_TU``, ``semisupervised_TU``)
         * ``"drop"`` -- ratio = fraction of nodes to drop
           (``semisupervised_MNIST_CIFAR10``)
+    residual_connections : bool, optional
+        If True, add each view's augmented node features to encoder output and
+        apply LayerNorm before graph pooling (same contract as other wrappers).
+        Passed via ``**kwargs`` to :class:`AbstractWrapper`.
     **kwargs : dict
         Additional arguments for the AbstractWrapper base class.
     """
@@ -82,7 +86,6 @@ class GraphCLGNNWrapper(AbstractWrapper):
         subgraph_ratio_meaning: str = "keep",
         **kwargs
     ):
-        kwargs["residual_connections"] = False
         super().__init__(backbone, **kwargs)
         
         self.aug1 = aug1
@@ -116,7 +119,20 @@ class GraphCLGNNWrapper(AbstractWrapper):
         
         if self.feature_dim is None:
             raise ValueError("Cannot determine feature dimension. Please provide 'out_channels' in kwargs.")
-    
+
+    def _apply_view_residual(self, enc: torch.Tensor, aug_x: torch.Tensor) -> torch.Tensor:
+        """Residual + LayerNorm on node embeddings (aligned augmented inputs)."""
+        return self.ln_0(enc + aug_x)
+
+    def residual_connection(self, model_out, batch):
+        """Residual is applied per augmented view inside :meth:`forward`.
+
+        The base implementation sums ``model_out['x_0']`` with ``batch.x_0``,
+        which is wrong here: contrastive views use augmented subgraphs, and
+        ``z1``/``z2`` must be built from post-residual node embeddings.
+        """
+        return model_out
+
     def augment(self, x, edge_index, batch_indices, aug_type, aug_ratio, device):
         """Apply augmentation to the graph.
         
@@ -363,6 +379,10 @@ class GraphCLGNNWrapper(AbstractWrapper):
             batch=aug_batch2,
             edge_weight=edge_weight if self.aug2 not in ["drop_edge", "drop_node", "subgraph"] else None,
         )
+
+        if self.residual_connections:
+            enc1 = self._apply_view_residual(enc1, aug_x1)
+            enc2 = self._apply_view_residual(enc2, aug_x2)
 
         z1 = self.pool_graph(enc1, aug_batch1)
         z2 = self.pool_graph(enc2, aug_batch2)

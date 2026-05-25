@@ -9,12 +9,12 @@ pretraining:
   transform_suffix: _graphcl
 
 # GraphCL needs its own wrapper (graph augmentations) and readout (projection head).
-# residual_connections: if true, AbstractWrapper adds batch.x_0 to model_out["x_0"] and
-# applies LayerNorm. Dimensions match (both are out_channels). Default false.
+# residual_connections: if true, each augmented view uses enc + aug_x + LayerNorm
+# before graph pooling (aligned with DGI/BGRL and downstream GNNWrapper conversion).
 model:
   backbone_wrapper:
     wrapper_name: GraphCLGNNWrapper
-    residual_connections: false        # options: false | true (forced false internally)
+    residual_connections: true         # options: false | true
     aug1: drop_edge                    # options: none | drop_node | drop_edge | mask_attr | subgraph
     aug2: mask_attr                    # options: none | drop_node | drop_edge | mask_attr | subgraph
     aug_ratio1: 0.2                    # augmentation strength for aug1 [0, 1)

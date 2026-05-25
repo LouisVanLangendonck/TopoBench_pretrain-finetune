@@ -219,7 +219,7 @@ dgi_FIXED=(
 
 # ── GraphCL ───────────────────────────────────────────────────────────────────
 # Swept: aug2 (all options except none), aug_ratio2, readout pooling_type.
-# Fixed: aug1=mask_attr, aug_ratio1=0.2, residual_connections=true (always on),
+# Fixed: aug1=mask_attr, aug_ratio1=0.2, residual_connections=true,
 #        readout_type=mean, mask_attr_strategy=zeros,
 #        edge_perturbation_mode=drop_only, subgraph_ratio_meaning=keep,
 #        projection_type=linear (from graphcl.yaml).
