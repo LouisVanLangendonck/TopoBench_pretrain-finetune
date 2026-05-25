@@ -17,6 +17,7 @@ from topobench.utils.config_resolvers import (
     get_monitor_mode,
     get_required_lifting,
     check_pses_in_transforms,
+    get_pretraining_transform,
 )
 
 class TestConfigResolvers:
@@ -76,6 +77,23 @@ class TestConfigResolvers:
 
         out = get_default_transform("graph/ZINC", "graph/gps")
         assert out == "dataset_model_defaults/ZINC_gps"
+
+    def test_get_pretraining_transform(self):
+        """Test get_pretraining_transform resolution order."""
+        out = get_pretraining_transform("graph/ogbg-molhiv", "graph/gps", "none")
+        assert out == "model_defaults/gps"
+
+        out = get_pretraining_transform("graph/ogbg-molhiv", "graph/gps", "graphmaev2")
+        assert out == "model_defaults/gps_graphmaev2"
+
+        out = get_pretraining_transform("graph/IMDB-MULTI", "graph/gin", "graphmaev2")
+        assert out == "dataset_defaults/IMDB-MULTI_graphmaev2"
+
+        out = get_pretraining_transform("graph/IMDB-MULTI", "graph/gps", "graphmaev2")
+        assert out == "dataset_model_defaults/IMDB-MULTI_graphmaev2_gps_graphmaev2"
+
+        out = get_pretraining_transform("graph/IMDB-BINARY", "graph/gin", "graphmaev2")
+        assert out == "dataset_model_defaults/IMDB-BINARY_gin_graphmaev2"
 
 
     def test_get_flattened_channels(self):

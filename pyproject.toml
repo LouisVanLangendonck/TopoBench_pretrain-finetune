@@ -61,6 +61,10 @@ dependencies=[
     "torch-scatter",
     "torch-sparse",
     "torch-cluster",
+    "PyTDC==1.1.15",
+    # PyTDC imports pkg_resources; setuptools>=81 is deprecating/removing it.
+    "setuptools>=69,<81",
+    "rdkit",
 ]
 
 [project.optional-dependencies]

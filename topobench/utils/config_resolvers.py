@@ -7,6 +7,29 @@ import torch
 from omegaconf import OmegaConf
 
 
+def set_preserve_edge_attr(model_name, default=True):
+    r"""Set the preserve_edge_attr parameter of datasets depending on the model.
+
+    Parameters
+    ----------
+    model_name : str
+        Model name.
+    default : bool, optional
+        Default value for the parameter. Defaults to True.
+
+    Returns
+    -------
+    bool
+        Default if the model can preserve edge attributes, False otherwise.
+    """
+    if model_name in ["hopse_m", "hopse_g"]:
+        return True
+    elif model_name in ["sann"]:
+        return False
+    else:
+        return default
+
+
 def register_all_resolvers():
     """Register all custom OmegaConf resolvers.
 
@@ -57,6 +80,21 @@ def register_all_resolvers():
     )
     OmegaConf.register_new_resolver(
         "parameter_multiplication", lambda x, y: int(int(x) * int(y)), replace=True
+    )
+    OmegaConf.register_new_resolver(
+        "get_pretraining_loss", get_pretraining_loss, replace=True
+    )
+    OmegaConf.register_new_resolver(
+        "get_pretraining_evaluator", get_pretraining_evaluator, replace=True
+    )
+    OmegaConf.register_new_resolver(
+        "get_pretraining_transform", get_pretraining_transform, replace=True
+    )
+    OmegaConf.register_new_resolver(
+        "set_preserve_edge_attr", set_preserve_edge_attr, replace=True
+    )
+    OmegaConf.register_new_resolver(
+        "get_raw_feature_dim", get_raw_feature_dim, replace=True
     )
 
 
@@ -196,6 +234,17 @@ def get_pretraining_evaluator(pretraining_choice="none"):
     return "default"
 
 
+def _transforms_config_path(*parts: str) -> str | None:
+    """Return a transforms config group path if ``configs/transforms/<parts>.yaml`` exists."""
+    base_dir = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+    rel = os.path.join("configs", "transforms", *parts)
+    if os.path.exists(os.path.join(base_dir, f"{rel}.yaml")):
+        return "/".join(parts)
+    return None
+
+
 def get_pretraining_transform(dataset, model, pretraining_choice="none"):
     r"""Select the correct transform config for the given model + pretraining combination.
 
@@ -207,9 +256,14 @@ def get_pretraining_transform(dataset, model, pretraining_choice="none"):
     group (e.g. ``"graphmaev2"``, ``"dgi"``, ``"none"``).  This is available at
     defaults-list resolution time because it is set by an earlier entry in that list.
 
-    If a file ``configs/transforms/model_defaults/<model>_<pretraining>.yaml`` exists
-    (e.g. ``gps_graphmaev2.yaml``), it is used; otherwise the standard transform
-    resolution falls through to :func:`get_default_transform`.
+    When pretraining is enabled, configs are resolved in order (most specific first):
+
+    1. ``dataset_model_defaults/<dataset>_<model>_<pretraining>.yaml``
+    2. ``dataset_model_defaults/<dataset>_<pretraining>_<model>_<pretraining>.yaml``
+       (legacy naming, e.g. ``IMDB-BINARY_graphmaev2_gin_graphmaev2``)
+    3. ``dataset_defaults/<dataset>_<pretraining>.yaml`` (dataset transforms + pretraining extras)
+    4. ``model_defaults/<model>_<pretraining>.yaml`` (pretraining-only; no dataset transforms)
+    5. :func:`get_default_transform` (supervised path)
 
     Parameters
     ----------
@@ -231,21 +285,26 @@ def get_pretraining_transform(dataset, model, pretraining_choice="none"):
     "model_defaults/gps"
     >>> get_pretraining_transform("graph/ogbg-molhiv", "graph/gps", "graphmaev2")
     "model_defaults/gps_graphmaev2"
+    >>> get_pretraining_transform("graph/IMDB-MULTI", "graph/gin", "graphmaev2")
+    "dataset_defaults/IMDB-MULTI_graphmaev2"
     """
-    model_domain, model_name = model.split("/")
+    _, dataset_name = dataset.split("/")
+    _, model_name = model.split("/")
 
     if pretraining_choice and pretraining_choice not in ("none", "null", ""):
-        base_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-        model_configs_dir = os.path.join(
-            base_dir, "configs", "transforms", "model_defaults"
-        )
-        candidate = os.path.join(
-            model_configs_dir, f"{model_name}_{pretraining_choice}.yaml"
-        )
-        if os.path.exists(candidate):
-            return f"model_defaults/{model_name}_{pretraining_choice}"
+        candidates = [
+            ("dataset_model_defaults", f"{dataset_name}_{model_name}_{pretraining_choice}"),
+            (
+                "dataset_model_defaults",
+                f"{dataset_name}_{pretraining_choice}_{model_name}_{pretraining_choice}",
+            ),
+            ("dataset_defaults", f"{dataset_name}_{pretraining_choice}"),
+            ("model_defaults", f"{model_name}_{pretraining_choice}"),
+        ]
+        for subdir, stem in candidates:
+            path = _transforms_config_path(subdir, stem)
+            if path is not None:
+                return path
 
     return get_default_transform(dataset, model)
 
@@ -355,43 +414,30 @@ def get_monitor_metric(task, metric):
         raise ValueError(f"Invalid task {task}")
 
 
-def get_monitor_mode(task):
-    r"""Get monitor mode for a given task.
+def get_monitor_mode(task, metric="accuracy"):
+    r"""Get monitor mode for a given task and metric.
 
     Parameters
     ----------
     task : str
-        Task, either "classification", "regression", "graphmaev2", "grace", "vgae", etc.
+        Task, e.g. "classification", "regression", "graphmaev2", "bgrl", etc.
+    metric : str
+        The monitored metric name (e.g. "accuracy", "loss", "mae", "cosine_sim").
 
     Returns
     -------
     str
-        Monitor mode, either "max" or "min".
-
-    Raises
-    ------
-    ValueError
-        If the task is invalid.
+        "min" if lower is better, "max" if higher is better.
     """
-    if (
-        task == "classification"
-        or task == "multilabel classification"
-        or task == "graphmaev2"  # GraphMAEv2: maximize cosine similarity
-        or task == "vgae"  # VGAE edge pretraining: maximize accuracy/auroc
-        or task == "dgi"  # DGI: maximize discrimination accuracy
-        or task == "bgrl"  # BGRL: maximize cosine similarity
-    ):
-        return "max"
-
-    elif (
-        task == "regression"
-        or task == "grace"  # GRACE: minimize contrastive loss
-        or task == "graphcl"  # GraphCL: minimize contrastive loss
-    ):
+    metric_lower = metric.lower()
+    # Metric-name-based inference: takes priority over task
+    if "loss" in metric_lower or "mae" in metric_lower or "mse" in metric_lower:
         return "min"
-
-    else:
-        raise ValueError(f"Invalid task {task}")
+    # Task-based fallback (covers regression metrics like mae/mse that may not say "loss")
+    if task == "regression":
+        return "min"
+    # Everything else (accuracy, auroc, f1, cosine_sim, …) is higher-is-better
+    return "max"
 
 
 def check_pses_in_transforms(transforms):
@@ -498,8 +544,14 @@ def infer_in_channels(dataset, transforms):
         List with dimensions of the input channels.
     """
     num_features = dataset.parameters.num_features
-    if isinstance(num_features, int) and transforms is not None:
-        num_features = num_features + check_pses_in_transforms(transforms)
+    if transforms is not None:
+        pse_features = check_pses_in_transforms(transforms)
+        if isinstance(num_features, int):
+            num_features = num_features + pse_features
+        elif pse_features > 0:
+            # num_features is a list (e.g. [node_feats, edge_feats]): PSEs go to node dim (index 0)
+            num_features = list(num_features)
+            num_features[0] = int(num_features[0]) + pse_features
 
     # Make it possible to pass lifting configuration as file path
     if transforms is not None and transforms.keys() == {"liftings"}:

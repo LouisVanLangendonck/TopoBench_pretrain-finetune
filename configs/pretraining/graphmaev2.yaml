@@ -9,12 +9,16 @@ pretraining:
   # Suffix to append to model name for transform lookup (e.g., gps -> gps_graphmaev2)
   transform_suffix: _graphmaev2
 
-# GraphMAEv2 needs its own wrapper (masking + EMA teacher) and readout (decoder + re-masking).
-# Residual connections must be off — the wrapper returns a multi-key dict, not a plain x_0 tensor.
 model:
   backbone_wrapper:
     wrapper_name: GraphMAEv2GNNWrapper
-    residual_connections: false
+    residual_connections: true
+    mask_rate: 0.5
+    replace_rate: 0.0
+    drop_edge_rate: 0.0
+    momentum: 0.996
+    delayed_ema_epoch: 0
+    lam: 1.0
   readout:
     readout_name: GraphMAEv2ReadOut
     hidden_dim: ${model.feature_encoder.out_channels}
@@ -22,6 +26,11 @@ model:
     out_channels: ${get_raw_feature_dim:${dataset.parameters.num_features}}
     task_level: ${dataset.parameters.task_level}
     pooling_type: sum
+    decoder_type: gat       # options: linear | mlp | gat | gcn
+    decoder_hidden_dim: 256
+    num_remasking: 5        # only used when decoder_type is gat or gcn
+    remask_rate: 0.5
+    remask_method: random   # options: random | fixed
 
 # Override loss and evaluator
 loss:
@@ -48,5 +57,5 @@ dataset:
   parameters:
     task: graphmaev2
     loss_type: sce
-    monitor_metric: recon_loss
+    monitor_metric: cosine_sim
     task_level: node  # GraphMAEv2 does node-level reconstruction

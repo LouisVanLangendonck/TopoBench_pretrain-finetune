@@ -209,6 +209,10 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
         self._init_ema()
         
         # Input features AFTER feature encoding
+        if not hasattr(batch, "x_0") and hasattr(batch, "x"):
+            batch.x_0 = batch.x
+        if getattr(batch, "batch", None) is not None and not hasattr(batch, "batch_0"):
+            batch.batch_0 = batch.batch
         x_0 = batch.x_0
         edge_index = batch.edge_index
         edge_weight = batch.get("edge_weight", None)

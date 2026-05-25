@@ -68,7 +68,8 @@ class VGAEReadOut(AbstractZeroCellReadOut):
     def forward(
         self, model_out: dict, batch: torch_geometric.data.Data
     ) -> dict:
-        node_embeddings = model_out["x_0"]
+        # Use z (latent sample) for edge scoring; fall back to x_0 for compatibility.
+        node_embeddings = model_out.get("z", model_out["x_0"])
         pos_edge_index = model_out["pos_edge_index"]
         neg_edge_index = model_out["neg_edge_index"]
 

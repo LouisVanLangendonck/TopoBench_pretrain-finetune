@@ -25,6 +25,9 @@ class AllCellFeatureEncoder(AbstractFeatureEncoder):
         Dropout for the BaseEncoders (default: 0).
     selected_dimensions : list[int], optional
         List of indexes to apply the BaseEncoders to (default: None).
+    graph_norm : bool, optional
+        Whether to apply GraphNorm before the linear projection in each
+        BaseEncoder (default: False).
     **kwargs : dict, optional
         Additional keyword arguments.
     """
@@ -35,6 +38,7 @@ class AllCellFeatureEncoder(AbstractFeatureEncoder):
         out_channels,
         proj_dropout=0,
         selected_dimensions=None,
+        graph_norm=False,
         **kwargs,
     ):
         super().__init__()
@@ -56,6 +60,7 @@ class AllCellFeatureEncoder(AbstractFeatureEncoder):
                     self.in_channels[i],
                     self.out_channels,
                     dropout=proj_dropout,
+                    graph_norm=graph_norm,
                 ),
             )
 
@@ -79,8 +84,10 @@ class AllCellFeatureEncoder(AbstractFeatureEncoder):
         torch_geometric.data.Data
             Output data object with updated x_{i} features.
         """
-        if not hasattr(data, "x_0"):
+        if not hasattr(data, "x_0") and hasattr(data, "x"):
             data.x_0 = data.x
+        if getattr(data, "batch", None) is not None and not hasattr(data, "batch_0"):
+            data.batch_0 = data.batch
 
         for i in self.dimensions:
             if hasattr(data, f"x_{i}") and hasattr(self, f"encoder_{i}"):
@@ -94,7 +101,8 @@ class AllCellFeatureEncoder(AbstractFeatureEncoder):
 class BaseEncoder(torch.nn.Module):
     r"""Base encoder class used by AllCellFeatureEncoder.
 
-    This class uses two linear layers with GraphNorm, Relu activation function, and dropout between the two layers.
+    This class uses a linear layer with optional GraphNorm, ReLU activation,
+    and dropout.
 
     Parameters
     ----------
@@ -103,23 +111,23 @@ class BaseEncoder(torch.nn.Module):
     out_channels : int
         Dimensions of output features.
     dropout : float, optional
-        Percentage of channels to discard between the two linear layers (default: 0).
+        Percentage of channels to discard after the linear layer (default: 0).
+    graph_norm : bool, optional
+        Whether to apply GraphNorm before the linear projection (default: False).
     """
 
-    def __init__(self, in_channels, out_channels, dropout=0):
+    def __init__(self, in_channels, out_channels, dropout=0, graph_norm=False):
         super().__init__()
-        self.BN = GraphNorm(in_channels)
+        self.BN = GraphNorm(in_channels) if graph_norm else None
         self.linear = torch.nn.Linear(in_channels, out_channels)
         self.relu = torch.nn.ReLU()
         self.dropout = torch.nn.Dropout(dropout)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(in_channels={self.linear.in_features}, out_channels={self.linear.out_features})"
+        return f"{self.__class__.__name__}(in_channels={self.linear.in_features}, out_channels={self.linear.out_features}, graph_norm={self.BN is not None})"
 
     def forward(self, x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
         r"""Forward pass of the encoder.
-
-        It applies two linear layers with GraphNorm, Relu activation function, and dropout between the two layers.
 
         Parameters
         ----------
@@ -133,7 +141,8 @@ class BaseEncoder(torch.nn.Module):
         torch.Tensor
             Output tensor of shape [N, out_channels].
         """
-        x = self.BN(x, batch=batch) if batch.shape[0] > 0 else self.BN(x)
+        if self.BN is not None:
+            x = self.BN(x, batch=batch) if batch.shape[0] > 0 else self.BN(x)
         x = self.linear(x)
         x = self.dropout(self.relu(x))
         return x

@@ -246,7 +246,12 @@ class VAEGNNWrapper(_EdgeSamplingGNNWrapper):
         )
 
         return {
-            "x_0": z,
+            # x_0 = raw backbone output [N, out_channels] — same shape as batch.x_0 so
+            # AbstractWrapper residual connections (batch.x_0 + x_0 → LayerNorm) work fine.
+            "x_0": h,
+            # z = latent sample [N, latent_dim] — used by VGAEReadOut for edge scoring.
+            # Kept separate so latent_dim can differ freely from out_channels.
+            "z": z,
             "mu": mu,
             "logvar": logvar,
             "pos_edge_index": pos_edge_index,

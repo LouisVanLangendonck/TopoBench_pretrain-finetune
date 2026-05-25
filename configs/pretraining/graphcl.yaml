@@ -9,17 +9,28 @@ pretraining:
   transform_suffix: _graphcl
 
 # GraphCL needs its own wrapper (graph augmentations) and readout (projection head).
-# Residual connections must be off — the wrapper returns a multi-key dict, not a plain x_0 tensor.
+# residual_connections: if true, AbstractWrapper adds batch.x_0 to model_out["x_0"] and
+# applies LayerNorm. Dimensions match (both are out_channels). Default false.
 model:
   backbone_wrapper:
     wrapper_name: GraphCLGNNWrapper
-    residual_connections: false
+    residual_connections: false        # options: false | true (forced false internally)
+    aug1: drop_edge                    # options: none | drop_node | drop_edge | mask_attr | subgraph
+    aug2: mask_attr                    # options: none | drop_node | drop_edge | mask_attr | subgraph
+    aug_ratio1: 0.2                    # augmentation strength for aug1 [0, 1)
+    aug_ratio2: 0.2                    # augmentation strength for aug2 [0, 1)
+    readout_type: mean                 # options: mean | sum | max
+    mask_attr_strategy: gaussian       # options: gaussian | zeros | mean
+    edge_perturbation_mode: drop_only  # options: drop_only | drop_and_add
+    subgraph_ratio_meaning: keep       # options: keep (ratio=fraction kept) | drop (ratio=fraction removed)
   readout:
     readout_name: GraphCLReadOut
     hidden_dim: ${model.feature_encoder.out_channels}
     out_channels: ${model.feature_encoder.out_channels}
     task_level: ${dataset.parameters.task_level}
     pooling_type: sum
+    projection_type: mlp               # options: none | linear | mlp
+    projection_hidden_dim: ${model.feature_encoder.out_channels}
 
 # Override loss and evaluator
 loss:

@@ -13,13 +13,20 @@ pretraining:
 model:
   backbone_wrapper:
     wrapper_name: BGRLGNNWrapper
-    residual_connections: false
+    residual_connections: false  # options: false | true
+    drop_edge_rate_1: 0.1        # [0, 1) edge dropout probability for view 1
+    drop_edge_rate_2: 0.2        # [0, 1) edge dropout probability for view 2
+    drop_feature_rate_1: 0.3     # [0, 1) feature dropout probability for view 1
+    drop_feature_rate_2: 0.2     # [0, 1) feature dropout probability for view 2
+    momentum: 0.99               # EMA momentum for target encoder update [0, 1]
+    force_undirected: false      # options: false | true
   readout:
     readout_name: BGRLReadOut
     hidden_dim: ${model.feature_encoder.out_channels}
     out_channels: ${model.feature_encoder.out_channels}  # predictor projects to same dim as encoder
     task_level: ${dataset.parameters.task_level}
     pooling_type: sum
+    predictor_hidden_dim: 64
 
 # Override loss and evaluator
 loss:

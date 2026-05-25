@@ -15,7 +15,7 @@ parameters:
   num_classes: 2
   task: classification
   loss_type: cross_entropy
-  monitor_metric: accuracy
+  monitor_metric: auroc
   task_level: graph
   max_dim_if_lifted: 3
   preserve_edge_attr_if_lifted: ${set_preserve_edge_attr:${model.model_name},True}

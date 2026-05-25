@@ -9,17 +9,28 @@ pretraining:
   transform_suffix: _vgae
 
 # VGAE needs its own wrapper (edge masking + variational encoding) and readout (edge decoder).
-# Residual connections must be off — the wrapper returns a multi-key dict, not a plain x_0 tensor.
+# Fine-tuning: extract backbone.backbone (the GNN) into a plain GNNWrapper — outputs
+#   [N, out_channels]. The fc_mu/fc_logvar projection layers are wrapper-only and are dropped.
+# residual_connections: now supported. VAEGNNWrapper outputs x_0 = h [N, out_channels]
+#   (backbone output) and z = latent [N, latent_dim] as separate keys. The residual is
+#   applied to x_0 only (dims always match). VGAEReadOut uses z for edge scoring.
 model:
   backbone_wrapper:
     wrapper_name: VAEGNNWrapper
-    residual_connections: false
+    residual_connections: false   # options: false | true
+    edge_sample_ratio: 0.5        # fraction of edges held out as positive test edges (0, 1)
+    neg_sample_ratio: 1.0         # negative edges per positive edge
+    sampling_method: sparse       # options: sparse | dense
+    variational: true             # options: true (VGAE, reparameterization) | false (deterministic GAE, z=mu)
+    latent_dim: 32                # dimension of z; can differ freely from out_channels
   readout:
     readout_name: VGAEReadOut
-    hidden_dim: ${model.feature_encoder.out_channels}
+    hidden_dim: ${model.backbone_wrapper.latent_dim}  # matches z dimension for MLP decoders
     out_channels: 1  # binary edge-existence score
     task_level: ${dataset.parameters.task_level}
     pooling_type: sum
+    decoder_type: dot             # options: dot | concat_mlp | hadamard_mlp
+    decoder_hidden_dim: 64       # only used when decoder_type is concat_mlp or hadamard_mlp
 
 # Override loss and evaluator
 loss:
