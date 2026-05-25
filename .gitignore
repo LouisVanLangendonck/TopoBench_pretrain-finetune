@@ -197,7 +197,6 @@ notebooks/tmp
 scripts/plotting/*.png
 scripts/plotting/*.pdf
 scripts/plotting/*.csv
-scripts/plotting/*.json
 scripts/plotting/outputs
 /downstream_adaptation_real_world_dataset/analysis_output/
 downstream_adaptation_real_world_dataset/data/
