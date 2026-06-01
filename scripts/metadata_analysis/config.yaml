@@ -1,0 +1,81 @@
+# ==============================================================================
+# METADATA ANALYSIS CONFIG
+# ==============================================================================
+#
+# Defines which datasets to analyse, how to load them, which graph-level
+# features to compute, and where to save the output.
+#
+# Datasets are loaded identically to the pretraining pipeline:
+#   model=graph/gin  +  pretraining=dgi
+# This ensures the correct pre_transforms are applied (e.g. one-hot degree
+# features for IMDB-BINARY, OGB atom features for molecular datasets).
+#
+# Features are computed per graph, then reduced (mean / std) over each split.
+# All 29 features are enabled by default; comment out any you want to skip.
+# ==============================================================================
+
+
+# ── Datasets to analyse ────────────────────────────────────────────────────────
+# Mirror the list in scripts/pretraining/gin_pretrain_sweep.sh; comment out
+# any datasets you want to skip.
+datasets:
+  - "graph/BBB_Martins"
+  - "graph/CYP3A4_Veith"
+  - "graph/ogbg-molhiv"
+  - "graph/MUTAG"
+  - "graph/PROTEINS"
+  - "graph/Caco2_Wang"
+  - "graph/Clearance_Hepatocyte_AZ"
+  - "graph/ogbg-molbace"
+  - "graph/IMDB-BINARY"
+
+
+# ── Model / pretraining (controls which pre_transforms are applied) ────────────
+model: "graph/gin"
+pretraining: "dgi"
+
+
+# ── Split seed (must match the pretraining sweep to reproduce exact splits) ────
+data_seed: 0
+
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output_dir: "scripts/metadata_analysis/outputs"
+
+
+# ── Feature toggle ────────────────────────────────────────────────────────────
+# Set any entry to false to skip that feature group entirely.
+features:
+  # ── Global counts (1 feature each) ────────────────────────────────────────
+  num_graphs: true            # number of graphs in the split
+  total_num_nodes: true       # total number of nodes across all graphs
+
+  # ── Basic topology (5 stats × 2 moments = 10 features) ───────────────────
+  edge_density: true          # 2m / (n(n-1))  [0,1]
+  avg_degree: true            # 2m / n
+  degree_assortativity: true  # Pearson r of connected-node degree pairs
+  num_nodes: true             # |V| per graph
+  num_edges: true             # |E| per graph (undirected, no self-loops)
+
+  # ── Distance (1 stat × 2 moments = 2 features) ───────────────────────────
+  pseudo_diameter: true       # BFS-based lower bound on graph diameter
+
+  # ── Clustering (3 stats × 2 moments = 6 features) ────────────────────────
+  avg_clustering_coef: true   # mean local clustering coefficient
+  transitivity: true          # 3 * #triangles / #triads
+  degeneracy: true            # max k-core number
+
+  # ── Degree distribution (1 stat × 2 moments = 2 features) ────────────────
+  gini_degree: true           # Gini coefficient of the node-degree sequence
+
+  # ── Spectral (3 stats × 2 moments = 6 features) ───────────────────────────
+  spectral_gap: true          # algebraic connectivity (2nd smallest Laplacian eigenvalue)
+  spectral_radius: true       # largest eigenvalue of the adjacency matrix
+  num_connected_components: true  # number of connected components
+
+  # ── Attribute assortativity (1 feature total) ─────────────────────────────
+  # Mean across graphs of nx.numeric_assortativity_coefficient using the first
+  # dimension of data.x as the scalar node attribute (atom type for molecular
+  # datasets; one-hot degree component for social datasets such as IMDB-BINARY).
+  # Falls back to degree assortativity when data.x is unavailable.
+  attribute_assortativity: false
