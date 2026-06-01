@@ -17,8 +17,8 @@ For a single project only:
    - `pretrained_config_pretraining.task`
 3. Group by every other hyperparameter column except `ft_train_seed`.
 4. Require exactly 3 training seeds per group (default `0, 1, 2`); flag mismatches to `*_flagged.csv`.
-5. Average `test/*` → `*_mean` / `*_std`.
-6. For each **(dataset, model, pretraining task, ft_mode, ft_fraction)**, keep the row with the best mean test monitor metric; drop the rest.
+5. Average logged metrics (`test/*`, `best_epoch/*`, `val/*`, …) → `*_mean` / `*_std`.
+6. For each **(dataset, model, pretraining task, ft_mode, ft_fraction)**, keep the row with the best mean **validation** metric (`best_epoch/val/{monitor_metric}`); settings without that metric are dropped (no fallback). The CSV stores **test** aggregates only (`test/*_mean`, `selection_score` = test mean). Pass `--select-on-test` to rank on test instead.
 7. Save `outputs/processed_projects/<project>.csv` (leading columns: dataset, model, pretraining, `ft_mode`, `ft_fraction`).
 
 ```bash
@@ -33,6 +33,10 @@ Merge all `outputs/processed_projects/*.csv` (not `*_flagged.csv`):
 
 - Same column name → one column.
 - Column only in some projects → kept with NaN elsewhere.
+- **Random-init baseline**: for each dataset, one pretraining task that still
+  has `random-init-*` rows supplies mean ± std for all other pretraining tasks
+  (same mode and train fraction).  New sweeps without random-init runs still
+  plot correctly when another task on that dataset has them.
 
 ```bash
 python scripts/plotting/combine_results.py

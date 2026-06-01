@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Merge per-project CSVs into one table (union of columns, NaN where missing).
 
+** seed_subsample pipeline **
+Input CSVs were produced by ``process_project.py`` which already filtered to
+``ft_seed_subsample == True`` runs only.
+
 Reads every ``*.csv`` in ``outputs/processed_projects/`` except ``*_flagged.csv``
 and writes ``outputs/aggregated_results.csv``.
 
@@ -24,6 +28,7 @@ DEFAULT_OUTPUT_PATH = _SCRIPT_DIR / "outputs" / "aggregated_results.csv"
 
 sys.path.insert(0, str(_SCRIPT_DIR.parents[1]))
 
+from scripts.plotting.shared_baseline import apply_shared_random_init_baseline
 from scripts.plotting.wb_table import order_columns
 
 
@@ -37,7 +42,12 @@ def combine_processed_csvs(
         if p.is_file() and not p.name.endswith("_flagged.csv")
     )
     if not paths:
-        raise FileNotFoundError(f"No processed CSV files in {input_dir}")
+        print(
+            f"  [combine] WARNING: no processed CSV files found in {input_dir}.\n"
+            f"  [combine] This likely means all projects were filtered out because\n"
+            f"  [combine] no runs had ft_seed_subsample=True.  Nothing to combine."
+        )
+        return pd.DataFrame()
 
     frames = []
     for p in paths:
@@ -48,8 +58,13 @@ def combine_processed_csvs(
         if not df.empty:
             frames.append(df)
     if not frames:
-        raise FileNotFoundError(f"All processed CSV files in {input_dir} are empty.")
+        print(
+            f"  [combine] WARNING: all processed CSV files in {input_dir} are empty.\n"
+            f"  [combine] Nothing to combine."
+        )
+        return pd.DataFrame()
     combined = pd.concat(frames, axis=0, ignore_index=True, sort=False)
+    combined = apply_shared_random_init_baseline(combined)
     combined = order_columns(combined)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(output_path, index=False)

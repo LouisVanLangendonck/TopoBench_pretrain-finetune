@@ -43,6 +43,7 @@ METADATA_COLUMNS: frozenset[str] = frozenset({
     "pretrained_run_id",
     "pretrained_run_name",
     "ft_subset_seed",
+    "ft_seed_subsample",
     "n_train",
     "n_val",
     "n_test",
@@ -51,7 +52,7 @@ METADATA_COLUMNS: frozenset[str] = frozenset({
     "n_total_params",
 })
 
-METRIC_PREFIXES: tuple[str, ...] = ("test/", "best_", "best_epoch/")
+METRIC_PREFIXES: tuple[str, ...] = ("test/", "val/", "best_", "best_epoch/")
 
 
 def flatten_config(cfg: dict, prefix: str = "", sep: str = ".") -> dict[str, Any]:
@@ -86,9 +87,19 @@ def is_hyperparam_column(col: str) -> bool:
         return False
     if col.startswith("wandb_"):
         return False
-    if col in ("monitor_task", "monitor_metric", "monitor_mode", "monitor_test_column"):
+    if col in (
+        "monitor_task",
+        "monitor_metric",
+        "monitor_mode",
+        "monitor_test_column",
+        "monitor_selection_column",
+        "selection_on",
+    ):
         return False
-    if col in ("seed_count", "seed_ok", "seeds_found", "n_runs", "selection_score", "selected"):
+    if col in (
+        "seed_count", "seed_ok", "seeds_found", "n_runs",
+        "selection_score", "selection_criterion_score", "selected",
+    ):
         return False
     if col.startswith("pretrained_config_paths."):
         return False
@@ -151,7 +162,8 @@ def order_columns(df: pd.DataFrame) -> pd.DataFrame:
     metrics = sorted(c for c in df.columns if is_metric_column(c))
     meta = [
         c for c in (
-            "selection_score", "selected", "monitor_metric", "monitor_test_column",
+            "selection_score", "selection_criterion_score", "selected", "selection_on",
+            "monitor_metric", "monitor_test_column", "monitor_selection_column",
             "monitor_mode", "wandb_project", "n_runs", "seed_count",
         )
         if c in df.columns

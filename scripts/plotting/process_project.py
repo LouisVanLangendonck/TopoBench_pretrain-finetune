@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """Aggregate + select best runs for a single W&B finetune project.
 
+** seed_subsample pipeline **
+This module is the seed_subsample-aware variant of process_project.  It
+REQUIRES that every run has ``ft_seed_subsample == True``; runs without this
+flag (or where the flag is False) are filtered out verbosely before any
+further processing.  Use ``scripts/plotting_legacy/process_project.py`` for
+the legacy fixed-subset pipeline.
+
 Steps (only uses runs from this project):
   1. Fetch runs, build a flat table.
+  1b. Filter: keep only runs where ``ft_seed_subsample == True`` (verbose).
   2. Drop constant columns (except dataset / model / pretraining task names).
   3. Group by all remaining hyperparameters except ``ft_train_seed``.
-  4. Keep groups with exactly ``N`` seeds; average ``test/*`` metrics.
-  5. Per (dataset, model, pretraining task, ft_mode, ft_fraction), keep the row
-     with the best mean test monitor metric; drop all other rows.
-  6. Write ``scripts/plotting/outputs/processed_projects/<project>.csv``.
+  4. Keep groups with exactly ``N`` seeds; average logged metric columns.
+  5. Per (dataset, model, pretraining task, ft_mode, ft_fraction), rank on mean
+     **validation** at the best-val epoch (``best_epoch/val/*``); drop settings
+     without that metric. Use ``--select-on-test`` to rank on test instead.
+  6. Export **test** metric aggregates only; ``selection_score`` is the test mean.
+  7. Write ``scripts/plotting/outputs/processed_projects/<project>.csv``.
 
 Usage
 -----
@@ -46,10 +56,22 @@ from scripts.plotting.wb_table import (
     order_columns,
 )
 
+# How hyperparameter groups are ranked before writing the CSV.
+SELECTION_ON_VALIDATION = "validation"
+SELECTION_ON_TEST = "test"
+
 DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "outputs" / "processed_projects"
 
 # Project name convention: finetune_{model}_pretrain_sweep_{pretraining_method}_{dataset_name}
 _PROJECT_NAME_RE = re.compile(r"^finetune_[^_]+_pretrain_sweep_[^_]+_(.+)$")
+
+# Suffix appended to W&B project names when seed_subsample=True.
+# Stripped before looking up the dataset in local configs.
+_SEEDSUB_SUFFIX = "_seedsub"
+
+# Overrides applied on top of what the dataset yaml says.
+# Use this when the yaml monitor_metric is not the metric you want to plot.
+MONITOR_METRIC_OVERRIDES: dict[str, str] = {}
 
 
 def load_dataset_monitor_info(
@@ -76,6 +98,13 @@ def load_dataset_monitor_info(
         monitor_metric = params.get("monitor_metric")
         if data_name and task and monitor_metric:
             result[str(data_name)] = (str(task), str(monitor_metric))
+
+    # Apply hardcoded overrides (e.g. prefer auroc over accuracy for ogbg-molhiv).
+    for data_name, override_metric in MONITOR_METRIC_OVERRIDES.items():
+        if data_name in result:
+            task_existing, _ = result[data_name]
+            result[data_name] = (task_existing, override_metric)
+
     return result
 
 
@@ -84,11 +113,19 @@ def extract_finetune_dataset_name(project: str) -> str | None:
 
     Convention: finetune_{model}_pretrain_sweep_{pretraining_method}_{dataset_name}
     Examples:
-      finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY  -> IMDB-BINARY
-      finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ  -> Clearance_Hepatocyte_AZ
+      finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY         -> IMDB-BINARY
+      finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ    -> Clearance_Hepatocyte_AZ
+      finetune_gin_pretrain_sweep_graphmaev2_BBB_Martins_seedsub -> BBB_Martins
+    The ``_seedsub`` suffix (from seed_subsample_project_suffix in sweep_config)
+    is stripped so the name matches the local dataset config files.
     """
     m = _PROJECT_NAME_RE.match(project)
-    return m.group(1) if m else None
+    if not m:
+        return None
+    name = m.group(1)
+    if name.endswith(_SEEDSUB_SUFFIX):
+        name = name[: -len(_SEEDSUB_SUFFIX)]
+    return name
 
 
 def sanitize_filename(project: str) -> str:
@@ -169,11 +206,66 @@ def _resolve_monitor_info(
     return None, None, "max"
 
 
+def _monitor_columns(
+    metric: str | None,
+    *,
+    select_on_test: bool,
+) -> tuple[str | None, str | None, str]:
+    """Return (test_col, selection_col, selection_on) for a dataset monitor metric."""
+    if not metric:
+        return None, None, SELECTION_ON_TEST if select_on_test else SELECTION_ON_VALIDATION
+    test_col = f"test/{metric}"
+    if select_on_test:
+        return test_col, test_col, SELECTION_ON_TEST
+    return test_col, f"best_epoch/val/{metric}", SELECTION_ON_VALIDATION
+
+
+def _mean_column_for(row: pd.Series, metric_col: str | None) -> str | None:
+    """Return ``{metric_col}_mean`` if present and finite, else ``None``."""
+    if not metric_col or (isinstance(metric_col, float) and np.isnan(metric_col)):
+        return None
+    mean_col = f"{metric_col}_mean"
+    if mean_col not in row.index:
+        return None
+    val = row[mean_col]
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return None
+    return mean_col
+
+
+def _selection_criterion_mean_column(row: pd.Series, select_on_test: bool) -> str | None:
+    """Mean column used only to rank hyperparameter groups (val or test)."""
+    if select_on_test:
+        col = row.get("monitor_test_column")
+    else:
+        col = row.get("monitor_selection_column")
+    return _mean_column_for(row, col if isinstance(col, str) else None)
+
+
+def _test_mean_column(row: pd.Series) -> str | None:
+    """Mean column for the held-out test metric (always required in output)."""
+    col = row.get("monitor_test_column")
+    return _mean_column_for(row, col if isinstance(col, str) else None)
+
+
+def _prune_non_test_metric_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop val/best_epoch (etc.) aggregates; keep ``test/*_mean`` / ``*_std`` only."""
+    drop = [
+        c for c in df.columns
+        if (c.endswith("_mean") or c.endswith("_std")) and not c.startswith("test/")
+    ]
+    if not drop:
+        return df
+    return df.drop(columns=drop)
+
+
 def aggregate_seeds(
     df: pd.DataFrame,
     expected_seeds: set[int],
     dataset_monitor_info: dict[str, tuple[str, str]] | None = None,
     finetune_data_name: str | None = None,
+    *,
+    select_on_test: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (valid aggregated groups, flagged groups)."""
     if df.empty:
@@ -181,13 +273,19 @@ def aggregate_seeds(
 
     _dmi = dataset_monitor_info or {}
     df = dedupe_columns(df)
-    test_cols = [c for c in df.columns if c.startswith("test/")]
+    metric_cols = [c for c in df.columns if is_metric_column(c)]
     group_cols = hyperparam_group_columns(df)
 
     task, metric, mode = _resolve_monitor_info(finetune_data_name, _dmi)
+    test_col, selection_col, selection_on = _monitor_columns(
+        metric, select_on_test=select_on_test,
+    )
     print(f"  [debug] finetune_data_name={finetune_data_name!r}  "
           f"monitor → task={task!r}  metric={metric!r}  mode={mode!r}")
-    print(f"  [debug] test cols in data: {test_cols}")
+    print(f"  [debug] selection_on={selection_on!r}  "
+          f"selection_col={selection_col!r}  test_col={test_col!r}")
+    print(f"  [debug] metric cols in data ({len(metric_cols)}): "
+          f"{metric_cols[:8]}{'…' if len(metric_cols) > 8 else ''}")
     print(f"  [debug] n_groups={df.groupby(group_cols, dropna=False).ngroups}  "
           f"expected_seeds={sorted(expected_seeds)}")
 
@@ -220,9 +318,11 @@ def aggregate_seeds(
         row["monitor_task"] = task
         row["monitor_metric"] = metric
         row["monitor_mode"] = mode
-        row["monitor_test_column"] = f"test/{metric}" if metric else None
+        row["monitor_test_column"] = test_col
+        row["monitor_selection_column"] = selection_col
+        row["selection_on"] = selection_on
 
-        for col in test_cols:
+        for col in metric_cols:
             vals = grp[col].dropna()
             if len(vals) == 0:
                 continue
@@ -235,8 +335,12 @@ def aggregate_seeds(
     return pd.DataFrame(valid_rows), pd.DataFrame(flagged_rows)
 
 
-def select_best_rows(agg: pd.DataFrame) -> pd.DataFrame:
-    """One row per selection-key combo with best mean test monitor metric."""
+def select_best_rows(
+    agg: pd.DataFrame,
+    *,
+    select_on_test: bool = False,
+) -> pd.DataFrame:
+    """One row per selection-key combo with best mean monitor on val or test."""
     if agg.empty:
         return agg
 
@@ -244,47 +348,120 @@ def select_best_rows(agg: pd.DataFrame) -> pd.DataFrame:
     if not keys:
         raise ValueError(f"Missing selection columns. Need some of: {SELECTION_KEY_COLUMNS}")
 
+    split_label = SELECTION_ON_TEST if select_on_test else SELECTION_ON_VALIDATION
     picked: list[pd.Series] = []
+    n_skipped_no_criterion = 0
+    n_skipped_no_test = 0
     for _, grp in agg.groupby(keys, dropna=False, sort=False):
-        candidates: list[tuple[float, pd.Series]] = []
+        candidates: list[tuple[float, pd.Series, str, str]] = []
         for _, row in grp.iterrows():
-            test_col = row.get("monitor_test_column")
-            if not test_col or (isinstance(test_col, float) and np.isnan(test_col)):
+            criterion_col = _selection_criterion_mean_column(row, select_on_test)
+            if not criterion_col:
+                n_skipped_no_criterion += 1
                 continue
-            mean_col = f"{test_col}_mean"
-            if mean_col not in row.index:
+            test_col = _test_mean_column(row)
+            if not test_col:
+                n_skipped_no_test += 1
                 continue
-            val = row[mean_col]
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                continue
-            candidates.append((float(val), row))
+            candidates.append((
+                float(row[criterion_col]),
+                row,
+                criterion_col,
+                test_col,
+            ))
 
         if not candidates:
-            # Debug: show why first failing group has no candidates (once only).
             if not picked:
                 sample_row = next(grp.iterrows())[1]
+                sc = sample_row.get("monitor_selection_column")
                 tc = sample_row.get("monitor_test_column")
-                mc = f"{tc}_mean" if tc else None
-                print(f"  [debug:select] first empty-candidate group: "
-                      f"monitor_test_column={tc!r}  "
-                      f"mean_col_present={mc in sample_row.index if mc else False}  "
-                      f"available_mean_cols={[c for c in sample_row.index if c.endswith('_mean')][:5]}")
+                print(f"  [debug:select] first empty-candidate group ({split_label}): "
+                      f"monitor_selection_column={sc!r}  monitor_test_column={tc!r}  "
+                      f"available_mean_cols={[c for c in sample_row.index if c.endswith('_mean')][:8]}")
             continue
 
         mode = str(grp["monitor_mode"].iloc[0]) if "monitor_mode" in grp.columns else "max"
-        _, best_row = (
+        _, best_row, criterion_col, test_col = (
             min(candidates, key=lambda x: x[0])
             if mode == "min"
             else max(candidates, key=lambda x: x[0])
         )
         best_row = best_row.copy()
-        best_row["selection_score"] = best_row[f"{best_row['monitor_test_column']}_mean"]
+        best_row["selection_criterion_score"] = best_row[criterion_col]
+        best_row["selection_score"] = best_row[test_col]
         best_row["selected"] = True
         picked.append(best_row)
 
+    if n_skipped_no_criterion or n_skipped_no_test:
+        print(f"  [select] dropped settings: {n_skipped_no_criterion} missing "
+              f"{split_label} metric, {n_skipped_no_test} missing test metric")
     if not picked:
         return pd.DataFrame()
-    return order_columns(pd.DataFrame(picked).reset_index(drop=True))
+    out = order_columns(pd.DataFrame(picked).reset_index(drop=True))
+    return _prune_non_test_metric_columns(out)
+
+
+_SEED_SUBSAMPLE_COL = "ft_seed_subsample"
+
+
+def filter_seed_subsample(raw: pd.DataFrame, project: str) -> pd.DataFrame:
+    """Keep only runs where ``ft_seed_subsample == True``.
+
+    Prints a clear, verbose report of every run that is dropped and why.
+    Returns an empty DataFrame if no qualifying runs remain so that the
+    caller can bail out gracefully.
+    """
+    col = _SEED_SUBSAMPLE_COL
+    n_total = len(raw)
+
+    if col not in raw.columns:
+        print(
+            f"  [seed_subsample] *** WARNING *** column '{col}' not found in "
+            f"project '{project}'."
+        )
+        print(
+            f"  [seed_subsample] This pipeline requires seed_subsample=True for "
+            f"all runs.  Dropping all {n_total} run(s)."
+        )
+        return raw.iloc[0:0].copy()
+
+    def _is_true(v: object) -> bool:
+        return str(v).strip().lower() in ("true", "1", "yes")
+
+    mask = raw[col].map(_is_true)
+    n_ok = int(mask.sum())
+    n_bad = n_total - n_ok
+
+    if n_bad > 0:
+        bad_df = raw.loc[~mask]
+        bad_ids = (
+            bad_df["wandb_run_id"].tolist()
+            if "wandb_run_id" in bad_df.columns
+            else []
+        )
+        bad_vals = bad_df[col].unique().tolist()
+        print(
+            f"  [seed_subsample] FILTERED OUT {n_bad}/{n_total} run(s) from "
+            f"project '{project}' where {col} != True."
+        )
+        print(f"  [seed_subsample]   Observed values: {bad_vals}")
+        if bad_ids:
+            shown = bad_ids[:15]
+            tail = f"  … (+{len(bad_ids) - 15} more)" if len(bad_ids) > 15 else ""
+            print(f"  [seed_subsample]   Dropped run IDs: {shown}{tail}")
+
+    if n_ok == 0:
+        print(
+            f"  [seed_subsample] No runs with {col}=True remain in project "
+            f"'{project}'.  Skipping project entirely."
+        )
+        return raw.iloc[0:0].copy()
+
+    print(
+        f"  [seed_subsample] {n_ok}/{n_total} run(s) have {col}=True — "
+        f"proceeding with seed_subsample pipeline."
+    )
+    return raw[mask].copy()
 
 
 def process_project(
@@ -294,8 +471,9 @@ def process_project(
     expected_seeds: list[int] | None = None,
     state: str = "finished",
     output_dir: Path | None = None,
+    select_on_test: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Full per-project pipeline. Returns (selected, flagged)."""
+    """Full per-project pipeline (seed_subsample=True required). Returns (selected, flagged)."""
     seeds = set(expected_seeds or [0, 1, 2])
     dmi = load_dataset_monitor_info()
     ft_data_name = extract_finetune_dataset_name(project)
@@ -306,11 +484,19 @@ def process_project(
     if raw.empty:
         return pd.DataFrame(), pd.DataFrame()
 
+    raw = filter_seed_subsample(raw, project)
+    if raw.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
     pruned = drop_constant_columns(raw)
     agg, flagged = aggregate_seeds(
-        pruned, seeds, dataset_monitor_info=dmi, finetune_data_name=ft_data_name,
+        pruned,
+        seeds,
+        dataset_monitor_info=dmi,
+        finetune_data_name=ft_data_name,
+        select_on_test=select_on_test,
     )
-    selected = select_best_rows(agg)
+    selected = select_best_rows(agg, select_on_test=select_on_test)
 
     out_dir = output_dir or DEFAULT_OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -334,6 +520,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-seeds", nargs="+", type=int, default=[0, 1, 2])
     p.add_argument("--state", default="finished", help="W&B state filter (empty = all).")
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    p.add_argument(
+        "--select-on-test",
+        action="store_true",
+        help="Pick best hyperparameters by mean test metric (default: validation at best epoch).",
+    )
     return p.parse_args()
 
 
@@ -346,6 +537,7 @@ def main() -> None:
         expected_seeds=args.train_seeds,
         state=state or "finished",
         output_dir=args.output_dir,
+        select_on_test=args.select_on_test,
     )
 
 
