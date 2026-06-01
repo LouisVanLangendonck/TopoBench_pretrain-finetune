@@ -197,7 +197,14 @@ notebooks/tmp
 scripts/plotting/*.png
 scripts/plotting/*.pdf
 scripts/plotting/*.csv
+scripts/plotting/*.json
 scripts/plotting/outputs
+scripts/plotting_legacy/*.png
+scripts/plotting_legacy/*.pdf
+scripts/plotting_legacy/*.csv
+scripts/plotting_legacy/*.json
+scripts/plotting_legacy/outputs
+scripts/plotting_legacy/hyperparam_analysis
 /downstream_adaptation_real_world_dataset/analysis_output/
 downstream_adaptation_real_world_dataset/data/
 
