@@ -11,14 +11,17 @@
 modes:
   - finetune-full
   - finetune-probe
-  - random-init-full
-  - random-init-probe
+  # - random-init-full
+  # - random-init-probe
 
 # ── Few-shot fractions of training data ───────────────────────────────────────
 fractions:
+  - 0.01   # 1%
   - 0.05    # 5%
-  - 0.50    # 50%
-  - 1.00    # 100%
+  - 0.15    # 15%
+  #- 0.30    # 30%
+  #- 0.50    # 50%
+  #- 1.00    # 100%
 
 # ── Downstream readout pooling (graph-level aggregation) ─────────────────────
 #   options: mean | sum | max  — each entry becomes a separate sweep dimension
@@ -34,9 +37,22 @@ patience: 10        # EarlyStopping patience (on dataset monitor_metric)
 seed: 42
 
 # Independent training seeds — each entry is one full repeat of the experiment.
-# Controls model initialisation + training stochasticity ONLY.
-# Data splits and few-shot subsets are identical across all seeds.
-train_seeds: [0, 1, 2]
+# When seed_subsample=false (default): controls model init + training stochasticity only;
+#   the few-shot subset is identical across all seeds (subset seed = `seed` above).
+# When seed_subsample=true: each train_seed also selects a DIFFERENT random subsample
+#   of the training fraction, so repeats differ in both data and model initialisation.
+#   This is more scientifically correct for few-shot evaluation.
+train_seeds: [0, 1, 2, 3]
+
+# Subsample-seed mode (see above).
+# false → fixed subset for all seeds (legacy behaviour)
+# true  → each train_seed independently resamples the training fraction
+seed_subsample: true
+
+# W&B project suffix appended when seed_subsample=true.
+# Runs land in  finetune_<project><suffix>  instead of  finetune_<project>
+# so the two experimental designs are kept in separate W&B projects.
+seed_subsample_project_suffix: _seedsub
 
 # Batch size for fine-tuning. null = inherit from the pretrained run config.
 batch_size: null
@@ -46,41 +62,67 @@ batch_size: null
 # project called finetune_<project>.  Can be overridden by --projects on CLI.
 entity: louis-van-langendonck-universitat-polit-cnica-de-catalunya
 projects:
+  # - gin_pretrain_sweep_graphmaev2_BBB_Martins
+  # - gin_pretrain_sweep_graphmaev2_CYP3A4_Veith
   # - gin_pretrain_sweep_graphmaev2_IMDB-BINARY
-  # - gin_pretrain_sweep_graphmaev2_MUTAG
   # - gin_pretrain_sweep_graphmaev2_PROTEINS
-  - gin_pretrain_sweep_graphmaev2_Caco2_Wang
-  - gin_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_graphmaev2_ogbg-molbace
+  # - gin_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_graphmaev2_ogbg-molhiv
+  - gin_pretrain_sweep_dgi_BBB_Martins
+  - gin_pretrain_sweep_dgi_CYP3A4_Veith
   - gin_pretrain_sweep_dgi_IMDB-BINARY
-  - gin_pretrain_sweep_dgi_MUTAG
   - gin_pretrain_sweep_dgi_PROTEINS
-  - gin_pretrain_sweep_dgi_Caco2_Wang
   - gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_dgi_ogbg-molbace
-  - gin_pretrain_sweep_graphcl_IMDB-BINARY
-  - gin_pretrain_sweep_graphcl_MUTAG
-  - gin_pretrain_sweep_graphcl_PROTEINS
-  - gin_pretrain_sweep_graphcl_Caco2_Wang
-  - gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_graphcl_ogbg-molbace
+  - gin_pretrain_sweep_dgi_ogbg-molhiv
+  - gin_pretrain_sweep_vgae_BBB_Martins
+  - gin_pretrain_sweep_vgae_CYP3A4_Veith
   - gin_pretrain_sweep_vgae_IMDB-BINARY
-  - gin_pretrain_sweep_vgae_MUTAG
   - gin_pretrain_sweep_vgae_PROTEINS
-  - gin_pretrain_sweep_vgae_Caco2_Wang
   - gin_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_vgae_ogbg-molbace
-  # - gin_pretrain_sweep_bgrl_BBB_Martins
-  # - gin_pretrain_sweep_bgrl_CYP3A4_Veith
-  # - gin_pretrain_sweep_bgrl_ogbg-molhiv
+  - gin_pretrain_sweep_vgae_ogbg-molhiv
+  - gin_pretrain_sweep_graphcl_BBB_Martins
+  - gin_pretrain_sweep_graphcl_CYP3A4_Veith
+  - gin_pretrain_sweep_graphcl_IMDB-BINARY
+  - gin_pretrain_sweep_graphcl_PROTEINS
+  - gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
+  - gin_pretrain_sweep_graphcl_ogbg-molhiv
+  - gin_pretrain_sweep_bgrl_BBB_Martins
+  - gin_pretrain_sweep_bgrl_CYP3A4_Veith
+  - gin_pretrain_sweep_bgrl_IMDB-BINARY
+  - gin_pretrain_sweep_bgrl_PROTEINS
+  - gin_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
+  - gin_pretrain_sweep_bgrl_ogbg-molhiv
+  # # - gin_pretrain_sweep_graphmaev2_Caco2_Wang
   # - gin_pretrain_sweep_dgi_BBB_Martins
   # - gin_pretrain_sweep_dgi_CYP3A4_Veith
-  # - gin_pretrain_sweep_dgi_ogbg-molhiv
+  # # - gin_pretrain_sweep_dgi_IMDB-BINARY
+  # # - gin_pretrain_sweep_dgi_PROTEINS
+  # # - gin_pretrain_sweep_dgi_Caco2_Wang
+  # # - gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
   # - gin_pretrain_sweep_graphcl_BBB_Martins
   # - gin_pretrain_sweep_graphcl_CYP3A4_Veith
-  # - gin_pretrain_sweep_graphcl_ogbg-molhiv
+  # # - gin_pretrain_sweep_graphcl_IMDB-BINARY
+  # # - gin_pretrain_sweep_graphcl_PROTEINS
+  # # - gin_pretrain_sweep_graphcl_Caco2_Wang
+  # # - gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_bgrl_BBB_Martins
+  # - gin_pretrain_sweep_bgrl_CYP3A4_Veith
+  # # - gin_pretrain_sweep_bgrl_IMDB-BINARY
+  # - gin_pretrain_sweep_bgrl_PROTEINS
+  # - gin_pretrain_sweep_bgrl_Caco2_Wang
+  # - gin_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
   # - gin_pretrain_sweep_vgae_BBB_Martins
   # - gin_pretrain_sweep_vgae_CYP3A4_Veith
+  # # - gin_pretrain_sweep_vgae_IMDB-BINARY
+  # # - gin_pretrain_sweep_vgae_PROTEINS
+  # # - gin_pretrain_sweep_vgae_Caco2_Wang
+  # # - gin_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_dgi_ogbg-molhiv
+  # - gin_pretrain_sweep_graphmaev2_ogbg-molhiv
+  # - gin_pretrain_sweep_bgrl_ogbg-molhiv
+  # #- gin_pretrain_sweep_dgi_ogbg-molhiv
+  # - gin_pretrain_sweep_graphcl_ogbg-molhiv
+  # - gin_pretrain_sweep_vgae_ogbg-molhiv
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 # Number of concurrent GPU workers.  Set to the number of available GPUs.

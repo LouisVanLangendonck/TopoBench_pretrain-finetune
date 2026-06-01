@@ -124,13 +124,13 @@ for i in "${!gpus[@]}"; do slot_pids[$i]=0; done
 datasets=(
     # "graph/BBB_Martins"
     # "graph/CYP3A4_Veith"
-    # "graph/ogbg-molhiv"
+    "graph/ogbg-molhiv"
     # "graph/MUTAG"
     # "graph/PROTEINS"
     # "graph/Caco2_Wang"
     # "graph/Clearance_Hepatocyte_AZ"
     # "graph/ogbg-molbace"
-    "graph/IMDB-BINARY"
+    # "graph/IMDB-BINARY"
 )
 
 # --- GIN architecture hyperparameters (shared across all methods) ---
@@ -146,8 +146,8 @@ PRETRAIN_METHODS=(
     # "bgrl"
     # "dgi"
     # "graphcl"
-    "graphmaev2"
-    # "vgae"
+    # "graphmaev2"
+    "vgae"
 )
 
 # --- Seeds ---
@@ -247,12 +247,12 @@ graphcl_FIXED=(
 graphmaev2_method_SWEEP=(
     "mr|model.backbone_wrapper.mask_rate|0.3 0.7"
     "mom|model.backbone_wrapper.momentum|0.99 0.996"
-    "res|model.backbone_wrapper.residual_connections|true"
     "pool|model.readout.pooling_type|sum mean"
     "dec|model.readout.decoder_type|mlp gcn"
 )
 graphmaev2_FIXED=(
     "model.backbone_wrapper.replace_rate=0.0"
+    "model.backbone_wrapper.residual_connections=true"
     "model.backbone_wrapper.drop_edge_rate=0.0"
     "model.backbone_wrapper.delayed_ema_epoch=0"
     "model.backbone_wrapper.lam=1.0"

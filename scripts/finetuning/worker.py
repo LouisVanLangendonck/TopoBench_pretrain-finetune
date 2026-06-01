@@ -68,6 +68,8 @@ def load_sweep_config(path: str) -> dict:
         patience=20,
         seed=42,
         batch_size=None,
+        seed_subsample=False,
+        seed_subsample_project_suffix="_seedsub",
     )
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
@@ -181,24 +183,48 @@ def main() -> None:
     }
 
     # ── 4. Run all (mode × fraction × pooling × train_seed) experiments ──────
-    # subset_seed is FIXED so the same few-shot samples are used for every seed
-    # repeat — only model init + training stochasticity vary across train_seeds.
-    subset_seed = cfg["seed"]
+    # seed_subsample controls whether each train_seed draws a DIFFERENT random
+    # subset (True) or all seeds share the same fixed subset (False / legacy).
+    seed_subsample: bool = cfg["seed_subsample"]
+    fixed_subset_seed: int = cfg["seed"]
+
+    # When seed_subsample is on, log to a separate W&B project so the two
+    # experimental designs never mix in the same project.
+    finetune_project = args.finetune_project
+    if seed_subsample:
+        suffix = cfg.get("seed_subsample_project_suffix", "_seedsub")
+        finetune_project = args.finetune_project + suffix
+        print(f"  [seed_subsample=True] → W&B project: {finetune_project}")
 
     for mode in cfg["modes"]:
         for fraction in cfg["fractions"]:
             for pooling in cfg["poolings"]:
-                # Build the subset datamodule once per (fraction, pooling) —
-                # it is identical for all train_seeds.
-                subset_dm = make_subset_datamodule(
-                    datamodule, fraction,
-                    batch_size=cfg["batch_size"],
-                    seed=subset_seed,
-                )
-                n_train = len(subset_dm.dataset_train)
+                # When seed_subsample is off: build the subset once and reuse it
+                # for all train_seeds (original behaviour — only model init varies).
+                if not seed_subsample:
+                    subset_dm = make_subset_datamodule(
+                        datamodule, fraction,
+                        batch_size=cfg["batch_size"],
+                        seed=fixed_subset_seed,
+                    )
+                    n_train = len(subset_dm.dataset_train)
+
                 frac_pct = int(fraction * 100)
 
                 for train_seed in cfg["train_seeds"]:
+                    # When seed_subsample is on: each train_seed draws its own
+                    # independent random subsample of the training fraction.
+                    if seed_subsample:
+                        subset_seed = train_seed
+                        subset_dm = make_subset_datamodule(
+                            datamodule, fraction,
+                            batch_size=cfg["batch_size"],
+                            seed=subset_seed,
+                        )
+                        n_train = len(subset_dm.dataset_train)
+                    else:
+                        subset_seed = fixed_subset_seed
+
                     run_name = (
                         f"{pretrain_run.name}__{mode}__{frac_pct}pct"
                         f"__{pooling}__s{train_seed}"
@@ -241,7 +267,7 @@ def main() -> None:
 
                         # ── Log to W&B ────────────────────────────────────────
                         wandb.init(
-                            project=args.finetune_project,
+                            project=finetune_project,
                             entity=args.entity,
                             name=run_name,
                             group=pretrain_run.id,
@@ -254,6 +280,7 @@ def main() -> None:
                                 "ft_pooling":         pooling,
                                 "ft_train_seed":      train_seed,
                                 "ft_subset_seed":     subset_seed,
+                                "ft_seed_subsample":  seed_subsample,
                                 "n_train":            n_train,
                                 "n_trainable_params": n_trainable,
                                 "n_total_params":     n_total,

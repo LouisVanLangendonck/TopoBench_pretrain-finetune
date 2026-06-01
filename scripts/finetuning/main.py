@@ -85,6 +85,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-seeds",  nargs="+", type=int, default=[0, 1, 2],
                    dest="train_seeds", metavar="S",
                    help="Seeds for model init + training randomness (one repeat per seed).")
+    p.add_argument("--seed-subsample", action="store_true", dest="seed_subsample",
+                   help="When set, each train-seed independently resamples the training "
+                        "fraction instead of all seeds sharing the same fixed subset. "
+                        "Corresponds to seed_subsample=true in sweep_config.yaml.")
     p.add_argument("--batch-size",   type=int, default=None, dest="batch_size",
                    help="Override batch size for fine-tuning (default: inherit from pretrain run).")
     p.add_argument("--device",
@@ -143,6 +147,7 @@ def main() -> None:
     print(f"  fractions: {args.fractions}")
     print(f"  poolings : {args.poolings}")
     print(f"  epochs  : {args.max_epochs}  patience={args.patience}")
+    print(f"  seed_subsample: {args.seed_subsample}")
 
     # ── 1. W&B run + checkpoint ───────────────────────────────────────────────
     run = fetch_run(args.project, args.entity, args.run_id)
@@ -196,19 +201,33 @@ def main() -> None:
     print(f"  splits: train={n_train_full}  val={n_val}  test={n_test}")
 
     # ── 4. Run all (mode × fraction × pooling × train_seed) experiments ──────
-    # subset_seed is fixed so the same few-shot samples are used for every repeat.
+    # seed_subsample controls whether each train_seed draws a different random
+    # subset (True) or all seeds share the same fixed subset (False / legacy).
     results: dict[str, dict[str, float]] = {}
 
     for mode in args.modes:
         for frac in args.fractions:
             for pooling in args.poolings:
-                # Build subset once per (frac, pooling) — same across all seeds
-                subset_dm = make_subset_datamodule(
-                    datamodule, frac, batch_size=args.batch_size, seed=args.seed
-                )
-                n_train = len(subset_dm.dataset_train)
+                # When seed_subsample is off: build subset once per (frac, pooling)
+                # so the same data is used for every train_seed (legacy behaviour).
+                if not args.seed_subsample:
+                    subset_dm = make_subset_datamodule(
+                        datamodule, frac, batch_size=args.batch_size, seed=args.seed
+                    )
+                    n_train = len(subset_dm.dataset_train)
 
                 for train_seed in args.train_seeds:
+                    # When seed_subsample is on: each train_seed draws its own
+                    # independent random subsample of the training fraction.
+                    if args.seed_subsample:
+                        subset_seed = train_seed
+                        subset_dm = make_subset_datamodule(
+                            datamodule, frac, batch_size=args.batch_size, seed=subset_seed
+                        )
+                        n_train = len(subset_dm.dataset_train)
+                    else:
+                        subset_seed = args.seed
+
                     exp_key = f"{mode} @ {int(frac * 100):3d}% [{pooling}] s{train_seed}"
                     print(f"\n{'─' * 60}")
                     print(f"  {exp_key}")
