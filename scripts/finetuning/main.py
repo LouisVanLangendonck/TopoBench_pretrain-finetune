@@ -66,11 +66,11 @@ def parse_args() -> argparse.Namespace:
         description="Few-shot fine-tuning of a pretrained TopoBench model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--project",  default="gin_pretrain_sweep_graphmaev2_Caco2_Wang")
+    p.add_argument("--project",  default="gin_pretrain_sweep_bgrl_BBB_Martins")
     p.add_argument("--entity",   default="louis-van-langendonck-universitat-polit-cnica-de-catalunya")
     p.add_argument("--run-id",   default=None, dest="run_id",
                    help="W&B run ID. Omit to use the first run in the project.")
-    p.add_argument("--fractions", nargs="+", type=float, default=[0.05, 0.50, 1.00],
+    p.add_argument("--fractions", nargs="+", type=float, default=[0.05],
                    metavar="F", help="Fractions of training data to use.")
     p.add_argument("--modes", nargs="+", default=FINETUNE_MODES,
                    choices=FINETUNE_MODES, metavar="MODE",

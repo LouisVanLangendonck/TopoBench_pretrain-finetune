@@ -96,7 +96,11 @@ class BGRLGNNWrapper(AbstractWrapper):
         return x_aug
 
     def _drop_edges(
-        self, edge_index: torch.Tensor, edge_attr: torch.Tensor | None, drop_rate: float
+        self,
+        edge_index: torch.Tensor,
+        edge_attr: torch.Tensor | None,
+        drop_rate: float,
+        virtual_node_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         if drop_rate <= 0.0:
             return edge_index, edge_attr
@@ -106,6 +110,12 @@ class BGRLGNNWrapper(AbstractWrapper):
             force_undirected=self.force_undirected,
             training=self.training,
         )
+        # Always preserve edges that touch the virtual node so the global
+        # aggregator stays connected to the graph after augmentation.
+        if virtual_node_mask is not None:
+            vn_edge = virtual_node_mask[edge_index[0]] | virtual_node_mask[edge_index[1]]
+            edge_mask = edge_mask | vn_edge
+            edge_index_aug = edge_index[:, edge_mask]
         edge_attr_aug = edge_attr[edge_mask] if edge_attr is not None else None
         return edge_index_aug, edge_attr_aug
 
@@ -116,10 +126,11 @@ class BGRLGNNWrapper(AbstractWrapper):
         edge_attr: torch.Tensor | None,
         drop_edge_rate: float,
         drop_feature_rate: float,
+        virtual_node_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         x_aug = self._drop_features(x, drop_feature_rate)
         edge_index_aug, edge_attr_aug = self._drop_edges(
-            edge_index, edge_attr, drop_edge_rate
+            edge_index, edge_attr, drop_edge_rate, virtual_node_mask
         )
         return x_aug, edge_index_aug, edge_attr_aug
 
@@ -158,7 +169,9 @@ class BGRLGNNWrapper(AbstractWrapper):
         edge_index = batch.edge_index
         batch_indices = batch.batch_0
         edge_weight = batch.get("edge_weight", None)
-        edge_attr = batch.get("edge_attr", None)
+        # Use the *encoded* edge features (x_1) not the raw edge_attr
+        edge_attr = batch.get("x_1", None)
+        virtual_node_mask = batch.get("virtual_node_mask", None)
 
         x_1, edge_index_1, edge_attr_1 = self._augment_view(
             x_0,
@@ -166,6 +179,7 @@ class BGRLGNNWrapper(AbstractWrapper):
             edge_attr,
             self.drop_edge_rate_1,
             self.drop_feature_rate_1,
+            virtual_node_mask,
         )
         x_2, edge_index_2, edge_attr_2 = self._augment_view(
             x_0,
@@ -173,6 +187,7 @@ class BGRLGNNWrapper(AbstractWrapper):
             edge_attr,
             self.drop_edge_rate_2,
             self.drop_feature_rate_2,
+            virtual_node_mask,
         )
 
         online_h_1 = self._encode(

@@ -68,61 +68,35 @@ projects:
   # - gin_pretrain_sweep_graphmaev2_PROTEINS
   # - gin_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ
   # - gin_pretrain_sweep_graphmaev2_ogbg-molhiv
-  - gin_pretrain_sweep_dgi_BBB_Martins
-  - gin_pretrain_sweep_dgi_CYP3A4_Veith
-  - gin_pretrain_sweep_dgi_IMDB-BINARY
-  - gin_pretrain_sweep_dgi_PROTEINS
-  - gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_dgi_ogbg-molhiv
-  - gin_pretrain_sweep_vgae_BBB_Martins
-  - gin_pretrain_sweep_vgae_CYP3A4_Veith
-  - gin_pretrain_sweep_vgae_IMDB-BINARY
-  - gin_pretrain_sweep_vgae_PROTEINS
-  - gin_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_vgae_ogbg-molhiv
-  - gin_pretrain_sweep_graphcl_BBB_Martins
-  - gin_pretrain_sweep_graphcl_CYP3A4_Veith
-  - gin_pretrain_sweep_graphcl_IMDB-BINARY
-  - gin_pretrain_sweep_graphcl_PROTEINS
-  - gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_graphcl_ogbg-molhiv
-  - gin_pretrain_sweep_bgrl_BBB_Martins
-  - gin_pretrain_sweep_bgrl_CYP3A4_Veith
-  - gin_pretrain_sweep_bgrl_IMDB-BINARY
-  - gin_pretrain_sweep_bgrl_PROTEINS
-  - gin_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
-  - gin_pretrain_sweep_bgrl_ogbg-molhiv
-  # # - gin_pretrain_sweep_graphmaev2_Caco2_Wang
   # - gin_pretrain_sweep_dgi_BBB_Martins
   # - gin_pretrain_sweep_dgi_CYP3A4_Veith
-  # # - gin_pretrain_sweep_dgi_IMDB-BINARY
-  # # - gin_pretrain_sweep_dgi_PROTEINS
-  # # - gin_pretrain_sweep_dgi_Caco2_Wang
-  # # - gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
-  # - gin_pretrain_sweep_graphcl_BBB_Martins
-  # - gin_pretrain_sweep_graphcl_CYP3A4_Veith
-  # # - gin_pretrain_sweep_graphcl_IMDB-BINARY
-  # # - gin_pretrain_sweep_graphcl_PROTEINS
-  # # - gin_pretrain_sweep_graphcl_Caco2_Wang
-  # # - gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
-  # - gin_pretrain_sweep_bgrl_BBB_Martins
-  # - gin_pretrain_sweep_bgrl_CYP3A4_Veith
-  # # - gin_pretrain_sweep_bgrl_IMDB-BINARY
-  # - gin_pretrain_sweep_bgrl_PROTEINS
-  # - gin_pretrain_sweep_bgrl_Caco2_Wang
-  # - gin_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_dgi_IMDB-BINARY
+  # - gin_pretrain_sweep_dgi_PROTEINS
+  # - gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_dgi_ogbg-molhiv
   # - gin_pretrain_sweep_vgae_BBB_Martins
   # - gin_pretrain_sweep_vgae_CYP3A4_Veith
-  # # - gin_pretrain_sweep_vgae_IMDB-BINARY
-  # # - gin_pretrain_sweep_vgae_PROTEINS
-  # # - gin_pretrain_sweep_vgae_Caco2_Wang
-  # # - gin_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
-  # - gin_pretrain_sweep_dgi_ogbg-molhiv
-  # - gin_pretrain_sweep_graphmaev2_ogbg-molhiv
-  # - gin_pretrain_sweep_bgrl_ogbg-molhiv
-  # #- gin_pretrain_sweep_dgi_ogbg-molhiv
-  # - gin_pretrain_sweep_graphcl_ogbg-molhiv
+  # - gin_pretrain_sweep_vgae_IMDB-BINARY
+  # - gin_pretrain_sweep_vgae_PROTEINS
+  # - gin_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
   # - gin_pretrain_sweep_vgae_ogbg-molhiv
+  # - gin_pretrain_sweep_graphcl_BBB_Martins
+  # - gin_pretrain_sweep_graphcl_CYP3A4_Veith
+  # - gin_pretrain_sweep_graphcl_IMDB-BINARY
+  # - gin_pretrain_sweep_graphcl_PROTEINS
+  # - gin_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_graphcl_ogbg-molhiv
+  # - gin_pretrain_sweep_bgrl_BBB_Martins
+  # - gin_pretrain_sweep_bgrl_CYP3A4_Veith
+  # - gin_pretrain_sweep_bgrl_IMDB-BINARY
+  # - gin_pretrain_sweep_bgrl_PROTEINS
+  # - gin_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
+  # - gin_pretrain_sweep_bgrl_ogbg-molhiv
+  # - gin_pretrain_sweep_graphmaev2_REDDIT-BINARY
+  # - gin_pretrain_sweep_dgi_REDDIT-BINARY
+  # - gin_pretrain_sweep_vgae_REDDIT-BINARY
+  # - gin_pretrain_sweep_graphcl_REDDIT-BINARY
+  # - gin_pretrain_sweep_bgrl_REDDIT-BINARY
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 # Number of concurrent GPU workers.  Set to the number of available GPUs.

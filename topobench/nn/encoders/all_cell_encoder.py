@@ -89,6 +89,19 @@ class AllCellFeatureEncoder(AbstractFeatureEncoder):
         if getattr(data, "batch", None) is not None and not hasattr(data, "batch_0"):
             data.batch_0 = data.batch
 
+        # For plain graph datasets (no lifting transform), raw edge features
+        # live in data.edge_attr rather than data.x_1.  Promote them so that
+        # the dimension-1 encoder can process them, and derive batch_1 from
+        # the source-node assignment (each edge belongs to the same graph as
+        # its source node).
+        if (
+            1 in self.dimensions
+            and not hasattr(data, "x_1")
+            and getattr(data, "edge_attr", None) is not None
+        ):
+            data.x_1 = data.edge_attr
+            data.batch_1 = data.batch_0[data.edge_index[0]]
+
         for i in self.dimensions:
             if hasattr(data, f"x_{i}") and hasattr(self, f"encoder_{i}"):
                 batch = getattr(data, f"batch_{i}")

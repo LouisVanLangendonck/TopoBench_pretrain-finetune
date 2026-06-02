@@ -1,0 +1,9 @@
+defaults:
+  # LapPE + RWSE are computed on the original graph first so that positional
+  # encodings reflect true graph structure.  They are concatenated to data.x,
+  # increasing node feature dim by (LapPE.max_pe_dim + RWSE.max_pe_dim) = 20.
+  # infer_in_channels automatically accounts for this via check_pses_in_transforms.
+  - data_manipulations@CombinedPSEs: combined_encodings
+  # Virtual node is added last: the new node gets zeros for all features
+  # (including the PE dims above), and its edges get zero edge_attr rows.
+  #- data_manipulations@VirtualNodeTransform: virtual_node

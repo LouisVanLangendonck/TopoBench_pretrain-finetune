@@ -133,15 +133,24 @@ class GraphCLGNNWrapper(AbstractWrapper):
         """
         return model_out
 
-    def augment(self, x, edge_index, batch_indices, aug_type, aug_ratio, device):
-        """Apply augmentation to the graph.
-        
+    def augment(self, x, edge_index, edge_attr, batch_indices, aug_type, aug_ratio,
+               device, virtual_node_mask=None):
+        """Apply augmentation to the graph, keeping edge_attr aligned with edge_index.
+
+        Virtual nodes are protected in every augmentation branch:
+        - ``drop_node``: virtual node is always kept.
+        - ``drop_edge``: edges touching the virtual node are never dropped.
+        - ``subgraph``: virtual node is always included in the kept set.
+        - ``mask_attr`` / ``none``: no topology changes, virtual node unaffected.
+
         Parameters
         ----------
         x : torch.Tensor
             Node features of shape (num_nodes, num_features).
         edge_index : torch.Tensor
             Edge indices of shape (2, num_edges).
+        edge_attr : torch.Tensor or None
+            Edge features of shape (num_edges, edge_dim), or None if absent.
         batch_indices : torch.Tensor
             Batch assignment for each node.
         aug_type : str
@@ -150,49 +159,74 @@ class GraphCLGNNWrapper(AbstractWrapper):
             Ratio of augmentation.
         device : torch.device
             Device to use.
-            
+        virtual_node_mask : torch.Tensor or None
+            Boolean mask of shape (num_nodes,) with ``True`` at virtual node
+            positions, or ``None`` when no virtual node is present.
+
         Returns
         -------
         tuple
-            (augmented_x, augmented_edge_index)
+            (aug_x, aug_edge_index, aug_edge_attr, new_batch_indices)
         """
         if aug_type == "none":
-            return x, edge_index, batch_indices
-        
+            return x, edge_index, edge_attr, batch_indices
+
         elif aug_type == "drop_node":
-            # Randomly drop nodes
             num_nodes = x.size(0)
             keep_mask = torch.rand(num_nodes, device=device) > aug_ratio
-            # Ensure at least one node per graph is kept
+            # Virtual node must always be kept
+            if virtual_node_mask is not None:
+                keep_mask[virtual_node_mask] = True
             keep_mask = self._ensure_connected(keep_mask, batch_indices)
-            
-            # Create new node features
+
             aug_x = x[keep_mask]
-            
-            # Create mapping from old to new node indices
+
             node_idx_mapping = torch.zeros(num_nodes, dtype=torch.long, device=device) - 1
             node_idx_mapping[keep_mask] = torch.arange(keep_mask.sum(), device=device)
-            
-            # Filter edges and remap indices
+
             edge_mask = keep_mask[edge_index[0]] & keep_mask[edge_index[1]]
             aug_edge_index = node_idx_mapping[edge_index[:, edge_mask]]
-            
-            # Update batch indices
+            aug_edge_attr = edge_attr[edge_mask] if edge_attr is not None else None
+
             new_batch_indices = batch_indices[keep_mask]
-            
-            return aug_x, aug_edge_index, new_batch_indices
-        
+            return aug_x, aug_edge_index, aug_edge_attr, new_batch_indices
+
         elif aug_type == "drop_edge":
             if self.edge_perturbation_mode == "drop_only":
-                aug_edge_index, _ = dropout_edge(edge_index, p=aug_ratio, training=True)
+                aug_edge_index, edge_mask = dropout_edge(edge_index, p=aug_ratio, training=True)
+                # Restore edges that touch the virtual node
+                if virtual_node_mask is not None:
+                    vn_edge = virtual_node_mask[edge_index[0]] | virtual_node_mask[edge_index[1]]
+                    edge_mask = edge_mask | vn_edge
+                    aug_edge_index = edge_index[:, edge_mask]
+                aug_edge_attr = edge_attr[edge_mask] if edge_attr is not None else None
             else:
-                # Drop some edges and add random ones (semisupervised variants)
+                # Drop some edges and add random ones (semisupervised variants).
+                # Added edges get zero attributes; they cannot share attributes with
+                # dropped edges, so we zero-fill the added portion.
+                # Virtual-node edges are never dropped.
                 num_edges = edge_index.size(1)
-                permute_num = int(num_edges * aug_ratio)
-                keep_num = num_edges - permute_num
+                if virtual_node_mask is not None:
+                    vn_edge = virtual_node_mask[edge_index[0]] | virtual_node_mask[edge_index[1]]
+                    droppable = torch.where(~vn_edge)[0]
+                else:
+                    droppable = torch.arange(num_edges, device=device)
 
-                keep_idx = torch.randperm(num_edges, device=device)[:keep_num]
+                permute_num = int(len(droppable) * aug_ratio)
+                keep_num = len(droppable) - permute_num
+                keep_local = torch.randperm(len(droppable), device=device)[:keep_num]
+                keep_idx = droppable[keep_local]
+
                 kept_edges = edge_index[:, keep_idx]
+                if virtual_node_mask is not None:
+                    vn_edges = edge_index[:, vn_edge]
+                    kept_edges = torch.cat([kept_edges, vn_edges], dim=1)
+                    if edge_attr is not None:
+                        kept_attr = torch.cat([edge_attr[keep_idx], edge_attr[vn_edge]], dim=0)
+                    else:
+                        kept_attr = None
+                else:
+                    kept_attr = edge_attr[keep_idx] if edge_attr is not None else None
 
                 num_nodes = x.size(0)
                 new_src = torch.randint(0, num_nodes, (permute_num,), device=device)
@@ -200,9 +234,16 @@ class GraphCLGNNWrapper(AbstractWrapper):
                 added_edges = torch.stack([new_src, new_dst], dim=0)
 
                 aug_edge_index = torch.cat([kept_edges, added_edges], dim=1)
-            return x, aug_edge_index, batch_indices
-        
+                if kept_attr is not None:
+                    added_attr = torch.zeros(permute_num, edge_attr.size(1), device=device, dtype=edge_attr.dtype)
+                    aug_edge_attr = torch.cat([kept_attr, added_attr], dim=0)
+                else:
+                    aug_edge_attr = None
+
+            return x, aug_edge_index, aug_edge_attr, batch_indices
+
         elif aug_type == "mask_attr":
+            # Only node features are changed; edge topology and attributes are unchanged.
             num_nodes = x.size(0)
             num_mask = max(int(num_nodes * aug_ratio), 1)
             perm = torch.randperm(num_nodes, device=device)
@@ -220,32 +261,35 @@ class GraphCLGNNWrapper(AbstractWrapper):
             else:  # "mean"
                 aug_x[idx_mask] = x.mean(dim=0)
 
-            return aug_x, edge_index, batch_indices
-        
+            return aug_x, edge_index, edge_attr, batch_indices
+
         elif aug_type == "subgraph":
-            # Random-walk-based subgraph sampling (per graph in the batch)
             num_nodes = x.size(0)
-            if self.subgraph_ratio_meaning == "keep":
-                keep_ratio = aug_ratio
-            else:
-                keep_ratio = 1.0 - aug_ratio
+            keep_ratio = aug_ratio if self.subgraph_ratio_meaning == "keep" else 1.0 - aug_ratio
             keep_mask = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+            # Virtual node is always included
+            if virtual_node_mask is not None:
+                keep_mask[virtual_node_mask] = True
 
             unique_batches = torch.unique(batch_indices)
             row, col = edge_index
 
             for b in unique_batches:
                 graph_mask = batch_indices == b
-                graph_nodes = graph_mask.nonzero(as_tuple=True)[0]
+                # Exclude virtual node from random-walk candidates
+                real_mask = graph_mask
+                if virtual_node_mask is not None:
+                    real_mask = graph_mask & ~virtual_node_mask
+                graph_nodes = real_mask.nonzero(as_tuple=True)[0]
                 n = graph_nodes.size(0)
+                if n == 0:
+                    continue
                 num_keep = max(int(n * keep_ratio), 1)
 
-                # Build per-graph adjacency for fast neighbor lookup
                 edge_in_graph = graph_mask[row] & graph_mask[col]
                 local_row = row[edge_in_graph]
                 local_col = col[edge_in_graph]
 
-                # Start a random walk from a random node in this graph
                 start = graph_nodes[torch.randint(n, (1,), device=device).item()]
                 visited = {start.item()}
                 current = start.item()
@@ -253,7 +297,6 @@ class GraphCLGNNWrapper(AbstractWrapper):
                 for _ in range(num_keep - 1):
                     neighbors = local_col[local_row == current]
                     if neighbors.numel() == 0:
-                        # Restart from a random visited node if stuck
                         visited_t = torch.tensor(list(visited), device=device)
                         current = visited_t[torch.randint(len(visited_t), (1,), device=device).item()].item()
                         neighbors = local_col[local_row == current]
@@ -270,11 +313,12 @@ class GraphCLGNNWrapper(AbstractWrapper):
             aug_edge_index, _, edge_mask = subgraph(
                 keep_mask, edge_index, relabel_nodes=True, return_edge_mask=True
             )
+            aug_edge_attr = edge_attr[edge_mask] if edge_attr is not None else None
             aug_x = x[keep_mask]
             new_batch_indices = batch_indices[keep_mask]
 
-            return aug_x, aug_edge_index, new_batch_indices
-        
+            return aug_x, aug_edge_index, aug_edge_attr, new_batch_indices
+
         else:
             raise ValueError(f"Unknown augmentation type: {aug_type}")
     
@@ -354,30 +398,45 @@ class GraphCLGNNWrapper(AbstractWrapper):
         x_0 = batch.x_0
         edge_index = batch.edge_index
         edge_weight = batch.get("edge_weight", None)
+        edge_attr = batch.get("x_1", None)
+        virtual_node_mask = batch.get("virtual_node_mask", None)
         batch_indices = batch.batch_0
 
         device = x_0.device
 
-        aug_x1, aug_edge_index1, aug_batch1 = self.augment(
-            x_0, edge_index, batch_indices, self.aug1, self.aug_ratio1, device
+        aug_x1, aug_edge_index1, aug_edge_attr1, aug_batch1 = self.augment(
+            x_0, edge_index, edge_attr, batch_indices, self.aug1, self.aug_ratio1,
+            device, virtual_node_mask
         )
 
-        aug_x2, aug_edge_index2, aug_batch2 = self.augment(
-            x_0, edge_index, batch_indices, self.aug2, self.aug_ratio2, device
+        aug_x2, aug_edge_index2, aug_edge_attr2, aug_batch2 = self.augment(
+            x_0, edge_index, edge_attr, batch_indices, self.aug2, self.aug_ratio2,
+            device, virtual_node_mask
         )
+
+        # Edge weight is positional and only valid when the edge set is unchanged.
+        aug1_changes_edges = self.aug1 in {"drop_edge", "drop_node", "subgraph"}
+        aug2_changes_edges = self.aug2 in {"drop_edge", "drop_node", "subgraph"}
+
+        # Only pass edge_attr if present — backbones without the param (e.g. GIN)
+        # must not receive it as an unexpected keyword argument.
+        extra1 = {"edge_attr": aug_edge_attr1} if aug_edge_attr1 is not None else {}
+        extra2 = {"edge_attr": aug_edge_attr2} if aug_edge_attr2 is not None else {}
 
         enc1 = self.backbone(
             aug_x1,
             aug_edge_index1,
             batch=aug_batch1,
-            edge_weight=edge_weight if self.aug1 not in ["drop_edge", "drop_node", "subgraph"] else None,
+            edge_weight=None if aug1_changes_edges else edge_weight,
+            **extra1,
         )
 
         enc2 = self.backbone(
             aug_x2,
             aug_edge_index2,
             batch=aug_batch2,
-            edge_weight=edge_weight if self.aug2 not in ["drop_edge", "drop_node", "subgraph"] else None,
+            edge_weight=None if aug2_changes_edges else edge_weight,
+            **extra2,
         )
 
         if self.residual_connections:

@@ -62,19 +62,24 @@ class DGIGNNWrapper(AbstractWrapper):
                 f"corruption_type must be 'feature_shuffle' or 'graph_diffusion', got {corruption_type}"
             )
     
-    def corrupt_graph(self, x, batch_indices):
+    def corrupt_graph(self, x, batch_indices, virtual_node_mask=None):
         """Corrupt node features to create negative samples.
-        
+
         For "feature_shuffle": Shuffle features within each graph (transductive).
-        This is used in the forward pass to create corrupted input features.
-        
+        Virtual nodes (marked by ``virtual_node_mask``) are excluded from the
+        shuffle — their zero features are preserved so the global aggregator
+        node is not given a meaningless corrupted representation.
+
         Parameters
         ----------
         x : torch.Tensor
             Node features of shape (num_nodes, num_features).
         batch_indices : torch.Tensor
             Batch assignment for each node.
-            
+        virtual_node_mask : torch.Tensor or None
+            Boolean tensor of shape (num_nodes,) with ``True`` at virtual node
+            positions, or ``None`` when no virtual node is present.
+
         Returns
         -------
         torch.Tensor
@@ -85,23 +90,21 @@ class DGIGNNWrapper(AbstractWrapper):
                 "corrupt_graph should only be called with feature_shuffle. "
                 "graph_diffusion uses different graphs directly."
             )
-        
-        # Shuffle features within each graph separately (transductive)
+
         batch_ids = batch_indices.unique()
         corrupted_x = x.clone()
-        
+
         for batch_id in batch_ids:
-            # Get nodes for this graph
             graph_mask = (batch_indices == batch_id)
+            # Exclude virtual node from the shuffle pool
+            if virtual_node_mask is not None:
+                graph_mask = graph_mask & ~virtual_node_mask
             graph_indices = torch.where(graph_mask)[0]
-            
-            # Shuffle node indices within this graph
+
             perm = torch.randperm(len(graph_indices), device=x.device)
             shuffled_indices = graph_indices[perm]
-            
-            # Replace features with shuffled features
             corrupted_x[graph_indices] = x[shuffled_indices]
-        
+
         return corrupted_x
     
     def forward(self, batch):
@@ -133,20 +136,31 @@ class DGIGNNWrapper(AbstractWrapper):
         x_0 = batch.x_0
         edge_index = batch.edge_index
         edge_weight = batch.get("edge_weight", None)
+        edge_attr = batch.get("x_1", None)
+        virtual_node_mask = batch.get("virtual_node_mask", None)
         batch_indices = batch.batch_0
         
+        # Build extra kwargs to forward only when values are present, so that
+        # backbones which don't declare these parameters (e.g. plain PyG GIN)
+        # are not given unexpected keyword arguments.
+        extra = {}
+        if edge_attr is not None:
+            extra["edge_attr"] = edge_attr
+
         if self.corruption_type == "feature_shuffle":
-            # Transductive: corrupt features, keep same graph structure
+            # Transductive: corrupt features, keep same graph structure.
+            # Edge topology and edge attributes are unchanged for both views.
             # Encode original graph (positive samples)
             h_positive = self.backbone(
                 x_0,
                 edge_index,
                 batch=batch_indices,
                 edge_weight=edge_weight,
+                **extra,
             )
             
             # Create corrupted graph (negative samples)
-            x_corrupted = self.corrupt_graph(x_0, batch_indices)
+            x_corrupted = self.corrupt_graph(x_0, batch_indices, virtual_node_mask)
             
             # Encode corrupted graph (negative samples)
             h_negative = self.backbone(
@@ -154,6 +168,7 @@ class DGIGNNWrapper(AbstractWrapper):
                 edge_index,
                 batch=batch_indices,
                 edge_weight=edge_weight,
+                **extra,
             )
             
             # Return both positive and negative embeddings for discriminator
@@ -194,6 +209,7 @@ class DGIGNNWrapper(AbstractWrapper):
                 edge_index,
                 batch=batch_indices,
                 edge_weight=edge_weight,
+                **extra,
             )
             
             # MEMORY OPTIMIZATION: Work directly with h_all, no copying

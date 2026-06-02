@@ -134,9 +134,13 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
         for param_q, param_k in zip(self.projector.parameters(), self.projector_ema.parameters(), strict=False):
             param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
     
-    def encoding_mask_noise(self, x, num_nodes, device):
+    def encoding_mask_noise(self, x, num_nodes, device, virtual_node_mask=None):
         """Apply masking and noise to node features.
-        
+
+        Virtual nodes (if present) are excluded from the mask candidate pool —
+        masking a node that already has zero features would cause the model to
+        waste capacity learning to reconstruct a zero vector.
+
         Parameters
         ----------
         x : torch.Tensor
@@ -145,14 +149,23 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
             Number of nodes in the graph.
         device : torch.device
             Device to use.
-            
+        virtual_node_mask : torch.Tensor or None
+            Boolean mask of shape (num_nodes,) with ``True`` at virtual node
+            positions, or ``None`` when no virtual node is present.
+
         Returns
         -------
         tuple
             (masked_x, mask_nodes, keep_nodes)
         """
-        perm = torch.randperm(num_nodes, device=device)
-        num_mask_nodes = int(self.mask_rate * num_nodes)
+        # Build the candidate pool — exclude virtual nodes
+        if virtual_node_mask is not None:
+            candidates = torch.where(~virtual_node_mask)[0]
+        else:
+            candidates = torch.arange(num_nodes, device=device)
+
+        perm = candidates[torch.randperm(len(candidates), device=device)]
+        num_mask_nodes = int(self.mask_rate * len(candidates))
         
         # Split into masked and kept nodes
         mask_nodes = perm[:num_mask_nodes]
@@ -182,15 +195,22 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
         
         return out_x, mask_nodes, keep_nodes
     
-    def drop_edges(self, edge_index, num_edges, device):
-        """Drop edges randomly."""
+    def drop_edges(self, edge_index, edge_attr, num_edges, device, virtual_node_mask=None):
+        """Drop edges randomly, keeping edge_attr aligned with edge_index.
+
+        Edges that touch the virtual node are always preserved — dropping them
+        would disconnect the global aggregator node from the graph.
+        """
         if self.drop_edge_rate <= 0:
-            return edge_index
-        
+            return edge_index, edge_attr
+
         mask = torch.rand(num_edges, device=device) > self.drop_edge_rate
-        new_edge_index = edge_index[:, mask]
-        
-        return new_edge_index
+        # Force-keep edges connected to the virtual node
+        if virtual_node_mask is not None:
+            vn_edge = virtual_node_mask[edge_index[0]] | virtual_node_mask[edge_index[1]]
+            mask = mask | vn_edge
+        new_edge_attr = edge_attr[mask] if edge_attr is not None else None
+        return edge_index[:, mask], new_edge_attr
     
     def forward(self, batch):
         r"""Forward pass for GraphMAEv2 encoding with masking and latent loss.
@@ -216,6 +236,8 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
         x_0 = batch.x_0
         edge_index = batch.edge_index
         edge_weight = batch.get("edge_weight", None)
+        edge_attr = batch.get("x_1", None)
+        virtual_node_mask = batch.get("virtual_node_mask", None)
         batch_indices = batch.batch_0
         
         num_nodes = x_0.size(0)
@@ -228,23 +250,33 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
             # Fallback
             x_raw_original = x_0.clone()
         
-        # Apply masking to the ENCODED features (x_0) for student input
+        # Apply masking to the ENCODED features (x_0) for student input.
+        # Virtual nodes are excluded from the mask candidate pool.
         masked_x, mask_nodes, keep_nodes = self.encoding_mask_noise(
-            x_0, num_nodes, device
+            x_0, num_nodes, device, virtual_node_mask
         )
         
-        # Drop edges for student (training only)
+        # Drop edges for student (training only); keep edge_attr aligned.
+        # Virtual-node edges are always preserved.
         if self.training and self.drop_edge_rate > 0:
-            use_edge_index = self.drop_edges(edge_index, edge_index.size(1), device)
+            use_edge_index, use_edge_attr = self.drop_edges(
+                edge_index, edge_attr, edge_index.size(1), device, virtual_node_mask
+            )
         else:
-            use_edge_index = edge_index
+            use_edge_index, use_edge_attr = edge_index, edge_attr
         
+        # Build extra kwargs so backbones that don't declare edge_attr (e.g. GIN)
+        # are not given unexpected keyword arguments.
+        extra_full = {"edge_attr": edge_attr} if edge_attr is not None else {}
+        extra_drop = {"edge_attr": use_edge_attr} if use_edge_attr is not None else {}
+
         # Encode with student encoder (masked input)
         enc_rep = self.backbone(
             masked_x,
             use_edge_index,
             batch=batch_indices,
             edge_weight=edge_weight,
+            **extra_drop,
         )
         
         # Compute latent loss components
@@ -260,6 +292,7 @@ class GraphMAEv2GNNWrapper(AbstractWrapper):
                     edge_index,  # Full edges
                     batch=batch_indices,
                     edge_weight=edge_weight,
+                    **extra_full,  # Full (unsubsetted) edge attributes
                 )
                 # Project and detach
                 latent_target = self.projector_ema(latent_target[keep_nodes])

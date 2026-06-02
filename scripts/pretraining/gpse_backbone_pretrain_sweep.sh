@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-# SCRIPT: gin_pretrain_sweep.sh
+# SCRIPT: gpse_backbone_pretrain_sweep.sh
 # DESCRIPTION:
-#   Hyperparameter sweep for GIN across all pretraining methods (BGRL, DGI,
+#   Hyperparameter sweep for GSPE_backbone across all pretraining methods (BGRL, DGI,
 #   GraphCL, GraphMAEv2, VGAE) on ADME and OGB molecular graph datasets.
 #
 #   Swept parameters per method are taken directly from the reference
 #   generate_inductive_experiment_<method>.py scripts (GPS-based experiments),
-#   adapted for GIN (heads removed) and extended with residual_connections.
+#   adapted for GPSE backbone and extended with residual_connections.
 #
 #   CONCURRENCY: Uses "Virtual Slots" — N parallel jobs per GPU.
 #   ORDERING:    Datasets → arch params → weight decay → method params → seeds.
@@ -122,22 +122,22 @@ for i in "${!gpus[@]}"; do slot_pids[$i]=0; done
 
 # --- Datasets ---
 datasets=(
-    # "graph/BBB_Martins"
-    # "graph/CYP3A4_Veith"
-    # "graph/ogbg-molhiv"
-    # "graph/MUTAG"
-    # "graph/PROTEINS"
-    # "graph/Caco2_Wang"
-    # "graph/Clearance_Hepatocyte_AZ"
+    "graph/BBB_Martins"
+    "graph/CYP3A4_Veith"
+    "graph/PROTEINS"
+    "graph/Clearance_Hepatocyte_AZ"
     # "graph/ogbg-molbace"
+    # "graph/ogbg-molhiv"
     # "graph/IMDB-BINARY"
-    graph/REDDIT-BINARY
+    # graph/REDDIT-BINARY
+    # "graph/Caco2_Wang"
     #graph/NCI1
 )
 
-# --- GIN architecture hyperparameters (shared across all methods) ---
-gin_hidden_channels=(64 128)   # model.feature_encoder.out_channels
-gin_num_layers=(2 4)            # model.backbone.num_layers
+# --- GSPE_backbone architecture hyperparameters (shared across all methods) ---
+gpse_hidden_channels=(128)   # model.feature_encoder.out_channels
+gpse_num_layers=(4 6)            # model.backbone.num_layers
+
 
 # --- Optimizer sweep (shared, from reference scripts) ---
 weight_decays=(0) #0.0001        # optimizer.parameters.weight_decay
@@ -145,20 +145,20 @@ learning_rates=(0.001) # 0.0005   # optimizer.parameters.lr
 
 # --- Pretraining methods to run (comment out any you want to skip) ---
 PRETRAIN_METHODS=(
-    #"bgrl"
-    #"dgi"
-    #"graphcl"
+    "bgrl"
+    "dgi"
+    "graphcl"
     "graphmaev2"
-    #"vgae"
+    "vgae"
 )
 
 # --- Seeds ---
 DATA_SEEDS=(0)
 
 # --- Fixed arguments applied to every run (from reference scripts) ---
-# Note: backbone.heads is GPS-specific and intentionally omitted for GIN.
+# Note: backbone.heads is GPS-specific and does not apply to GPSE backbone.
 FIXED_ARGS=(
-    "model=graph/gin"
+    "model=graph/gpse_backbone"
     "model.backbone.dropout=0.0"
     "model.feature_encoder.proj_dropout=0.2"
     "dataset.dataloader_params.batch_size=256"
@@ -198,7 +198,7 @@ bgrl_FIXED=(
     "model.backbone_wrapper.drop_edge_rate_1=0.2"
     "model.backbone_wrapper.drop_feature_rate_1=0.2"
     "model.backbone_wrapper.force_undirected=false"
-    "model.backbone_wrapper.residual_connections=true"
+    "model.backbone_wrapper.residual_connections=false"
     "model.readout.predictor_hidden_dim=64"
 )
 
@@ -213,7 +213,7 @@ dgi_method_SWEEP=(
     "pool|model.readout.readout_type|sum mean"
 )
 dgi_FIXED=(
-    "model.backbone_wrapper.residual_connections=true"
+    "model.backbone_wrapper.residual_connections=false"
     "model.backbone_wrapper.verbose=false"
     "model.readout.pooling_type=sum"
     "model.readout.out_channels=1"
@@ -233,7 +233,7 @@ graphcl_method_SWEEP=(
 graphcl_FIXED=(
     "model.backbone_wrapper.aug1=mask_attr"
     "model.backbone_wrapper.aug_ratio1=0.2"
-    "model.backbone_wrapper.residual_connections=true"
+    "model.backbone_wrapper.residual_connections=false"
     "model.backbone_wrapper.readout_type=mean"
     "model.backbone_wrapper.mask_attr_strategy=zeros"
     "model.backbone_wrapper.edge_perturbation_mode=drop_only"
@@ -254,7 +254,7 @@ graphmaev2_method_SWEEP=(
 )
 graphmaev2_FIXED=(
     "model.backbone_wrapper.replace_rate=0.0"
-    "model.backbone_wrapper.residual_connections=true"
+    "model.backbone_wrapper.residual_connections=false"
     "model.backbone_wrapper.drop_edge_rate=0.0"
     "model.backbone_wrapper.delayed_ema_epoch=0"
     "model.backbone_wrapper.lam=1.0"
@@ -279,7 +279,7 @@ vgae_FIXED=(
     "model.backbone_wrapper.neg_sample_ratio=1.0"
     "model.backbone_wrapper.sampling_method=sparse"
     "model.backbone_wrapper.latent_dim=32"
-    "model.backbone_wrapper.residual_connections=true"
+    "model.backbone_wrapper.residual_connections=false"
     "model.readout.decoder_type=dot"
     "model.readout.decoder_hidden_dim=64"
     "model.readout.out_channels=1"
@@ -353,8 +353,8 @@ total_runs=0
 # Shared sweep dimensions applied to every method
 shared_SWEEP=(
     "|dataset|${datasets[*]}"
-    "h|model.feature_encoder.out_channels|${gin_hidden_channels[*]}"
-    "L|model.backbone.num_layers|${gin_num_layers[*]}"
+    "h|model.feature_encoder.out_channels|${gpse_hidden_channels[*]}"
+    "L|model.backbone.num_layers|${gpse_num_layers[*]}"
     "wd|optimizer.parameters.weight_decay|${weight_decays[*]}"
     "lr|optimizer.parameters.lr|${learning_rates[*]}"
     "seed|dataset.split_params.data_seed|${DATA_SEEDS[*]}"

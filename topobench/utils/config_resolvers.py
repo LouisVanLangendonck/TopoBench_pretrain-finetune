@@ -696,7 +696,12 @@ def infer_in_channels(dataset, transforms):
             return [num_features]
 
         else:
-            return [num_features[0]]
+            # Preserve edge feature dimensionality so that encoders/wrappers
+            # that consume edge attributes (e.g. EdgeAttrGNNWrapper +
+            # GPSEBackbone) receive the correct in_channels list.  Models that
+            # do not use edge features will simply create an encoder_1 that
+            # encodes x_1 but never forward it — harmless extra compute.
+            return list(num_features)
 
     # This else is never executed
     else:

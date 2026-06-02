@@ -216,7 +216,17 @@ def load_model(
         model.backbone._init_ema()
 
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    model.load_state_dict(ckpt["state_dict"], strict=True)
+    missing, unexpected = model.load_state_dict(ckpt["state_dict"], strict=False)
+    if unexpected:
+        raise RuntimeError(
+            f"Checkpoint has unexpected keys not present in the model "
+            f"(wrong checkpoint?): {unexpected}"
+        )
+    if missing:
+        print(
+            f"  [load_model] WARNING: {len(missing)} key(s) not in checkpoint and "
+            f"will use random init: {missing}"
+        )
     model.to(device).eval()
 
     n_params = sum(p.numel() for p in model.parameters())
@@ -388,6 +398,7 @@ def build_downstream_model(
     """
     from topobench.model import TBModel
     from topobench.nn.wrappers.graph.gnn_wrapper import GNNWrapper
+    from topobench.nn.wrappers.graph.edge_attr_gnn_wrapper import EdgeAttrGNNWrapper
 
     pw = pretrained_model.backbone  # e.g. GraphMAEv2GNNWrapper / BGRLGNNWrapper / …
 
@@ -419,8 +430,27 @@ def build_downstream_model(
     residual = pw.residual_connections
     num_cell_dims = len(list(pw.dimensions))  # range → int
 
-    # ── 2. Clean GNNWrapper ───────────────────────────────────────────────────
-    new_wrapper = GNNWrapper(
+    # ── 2. GNN wrapper — selected by backbone class, not dataset attributes ──────
+    # Keying off the backbone *class* is the only reliable signal: a dataset with
+    # edge features would give GIN a truthy `edge_dim` attribute even though GIN
+    # never uses edge features, causing a false positive.
+    from topobench.nn.backbones.graph.gpse_backbone import GPSEBackbone
+    try:
+        from torch_geometric.nn.models import GIN as _GIN
+    except ImportError:
+        _GIN = None  # type: ignore[assignment,misc]
+
+    if isinstance(gnn_encoder, GPSEBackbone):
+        WrapperCls = EdgeAttrGNNWrapper
+    elif _GIN is not None and isinstance(gnn_encoder, _GIN):
+        WrapperCls = GNNWrapper
+    else:
+        raise NotImplementedError(
+            f"Backbone type {type(gnn_encoder).__name__!r} has no explicit wrapper "
+            "mapping in build_downstream_model(). Add it before using this backbone "
+            "for fine-tuning."
+        )
+    new_wrapper = WrapperCls(
         backbone=gnn_encoder,
         out_channels=out_channels,
         num_cell_dimensions=num_cell_dims,
@@ -435,9 +465,13 @@ def build_downstream_model(
                 dst.load_state_dict(src.state_dict())
 
     # ── 3. Downstream readout (fresh linear head) ─────────────────────────────
+    # Use the backbone's own out_channels when available — for backbones that
+    # report a different output dimension than feature_encoder.out_channels
+    # (e.g. future architectures with expanding final layers).
+    readout_hidden = getattr(gnn_encoder, "out_channels", out_channels)
     ds_params = downstream_cfg.dataset.parameters
     readout = DownstreamReadOut(
-        hidden_dim=out_channels,
+        hidden_dim=readout_hidden,
         out_channels=int(ds_params.num_classes),
         task_level=str(ds_params.task_level),
         pooling_type=pooling_type,
