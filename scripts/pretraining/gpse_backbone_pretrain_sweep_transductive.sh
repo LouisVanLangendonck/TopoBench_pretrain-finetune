@@ -1,9 +1,11 @@
 #!/bin/bash
 # ==============================================================================
-# SCRIPT: gpse_backbone_pretrain_sweep.sh
+# SCRIPT: gpse_backbone_pretrain_sweep_transductive.sh
 # DESCRIPTION:
-#   Hyperparameter sweep for GSPE_backbone across all pretraining methods (BGRL, DGI,
-#   GraphCL, GraphMAEv2, VGAE) on ADME and OGB molecular graph datasets.
+#   Hyperparameter sweep for GPSE_backbone across all pretraining methods (BGRL,
+#   DGI, GraphMAEv2, VGAE) on transductive node-classification datasets.
+#   GraphCL is excluded (augmentation design is less suited to transductive).
+#   DGI uses feature_shuffle corruption only (no graph_diffusion).
 #
 #   Swept parameters per method are taken directly from the reference
 #   generate_inductive_experiment_<method>.py scripts (GPS-based experiments),
@@ -12,13 +14,12 @@
 #   CONCURRENCY: Uses "Virtual Slots" — N parallel jobs per GPU.
 #   ORDERING:    Datasets → arch params → weight decay → method params → seeds.
 #
-# ESTIMATED RUNS (3 datasets × 2 hidden × 2 layers × 1 wd × 1 lr × 1 seed = 12 base):
-#   BGRL:       12 × 2 (de2) × 2 (df2) × 2 (mom) × 2 (pool)            =  192
-#   DGI:        12 × 2 (crpt) × 2 (readout_type)                        =   48
-#   GraphCL:    12 × 4 (aug2) × 2 (r2) × 2 (pool)                      =  192
-#   GraphMAEv2: 12 × 2 (mr) × 2 (mom) × 2 (res) × 2 (pool) × 2 (dec)  =  384
-#   VGAE:       12 × 2 (esr) × 2 (var) × 2 (pool)                      =   96
-#   ──────────────────────────────────────────────────────────────────── = 912
+# ESTIMATED RUNS (4 datasets × 1 hidden × 2 layers × 1 wd × 1 lr × 1 seed = 8 base):
+#   BGRL:       8 × 2 (de2) × 2 (df2) × 2 (mom) × 2 (pool)           =  128
+#   DGI:        8 × 1 (crpt) × 2 (readout_type)                       =   16
+#   GraphMAEv2: 8 × 2 (mr) × 2 (mom) × 2 (pool) × 2 (dec)            =  128
+#   VGAE:       8 × 2 (esr) × 2 (var) × 2 (pool)                      =   64
+#   ──────────────────────────────────────────────────────────────────── = 336
 #
 # Reduce sweep size by commenting out values in the param arrays (Section 3).
 # ==============================================================================
@@ -122,16 +123,10 @@ for i in "${!gpus[@]}"; do slot_pids[$i]=0; done
 
 # --- Datasets ---
 datasets=(
-    # "graph/BBB_Martins"
-    # "graph/CYP3A4_Veith"
-    # "graph/PROTEINS"
-    # "graph/Clearance_Hepatocyte_AZ"
-    # "graph/ogbg-molbace"
-    "graph/ogbg-molhiv"
-    "graph/IMDB-BINARY"
-    "graph/REDDIT-BINARY"
-    # "graph/Caco2_Wang"
-    #graph/NCI1
+    "graph/cocitation_cora"
+    "graph/cocitation_pubmed"
+    "graph/minesweeper"
+    "graph/roman_empire"
 )
 
 # --- GSPE_backbone architecture hyperparameters (shared across all methods) ---
@@ -147,7 +142,6 @@ learning_rates=(0.001) # 0.0005   # optimizer.parameters.lr
 PRETRAIN_METHODS=(
     "bgrl"
     "dgi"
-    "graphcl"
     "graphmaev2"
     "vgae"
 )
@@ -157,11 +151,12 @@ DATA_SEEDS=(0)
 
 # --- Fixed arguments applied to every run (from reference scripts) ---
 # Note: backbone.heads is GPS-specific and does not apply to GPSE backbone.
+# Note: batch_size is intentionally NOT set here — transductive datasets require
+#       batch_size=1 (whole graph = one batch) which is set in each dataset config.
 FIXED_ARGS=(
     "model=graph/gpse_backbone"
     "model.backbone.dropout=0.0"
     "model.feature_encoder.proj_dropout=0.2"
-    "dataset.dataloader_params.batch_size=256"
     "trainer.max_epochs=400"
     "trainer.min_epochs=10"
     "trainer.check_val_every_n_epoch=2"
@@ -203,13 +198,14 @@ bgrl_FIXED=(
 )
 
 # ── DGI ───────────────────────────────────────────────────────────────────────
-# Swept: corruption_type, readout.readout_type (graph summary pooling used in
+# Swept: corruption_type (feature_shuffle only; graph_diffusion excluded for
+#        transductive), readout.readout_type (graph summary pooling used in
 #        the bilinear discriminator — this is the meaningful DGI pooling knob,
 #        not pooling_type which is unused in DGI's forward pass).
 # Fixed: residual_connections=true (always on), verbose=false,
 #        pooling_type=sum, out_channels=1 (from dgi.yaml).
 dgi_method_SWEEP=(
-    "crpt|model.backbone_wrapper.corruption_type|feature_shuffle graph_diffusion"
+    "crpt|model.backbone_wrapper.corruption_type|feature_shuffle"
     "pool|model.readout.readout_type|sum mean"
 )
 dgi_FIXED=(
@@ -217,28 +213,6 @@ dgi_FIXED=(
     "model.backbone_wrapper.verbose=false"
     "model.readout.pooling_type=sum"
     "model.readout.out_channels=1"
-)
-
-# ── GraphCL ───────────────────────────────────────────────────────────────────
-# Swept: aug2 (all options except none), aug_ratio2, readout pooling_type.
-# Fixed: aug1=mask_attr, aug_ratio1=0.2, residual_connections=true,
-#        readout_type=mean, mask_attr_strategy=zeros,
-#        edge_perturbation_mode=drop_only, subgraph_ratio_meaning=keep,
-#        projection_type=linear (from graphcl.yaml).
-graphcl_method_SWEEP=(
-    "a2|model.backbone_wrapper.aug2|drop_node drop_edge mask_attr subgraph"
-    "r2|model.backbone_wrapper.aug_ratio2|0.2 0.5"
-    "pool|model.readout.pooling_type|sum mean"
-)
-graphcl_FIXED=(
-    "model.backbone_wrapper.aug1=mask_attr"
-    "model.backbone_wrapper.aug_ratio1=0.2"
-    "model.backbone_wrapper.residual_connections=false"
-    "model.backbone_wrapper.readout_type=mean"
-    "model.backbone_wrapper.mask_attr_strategy=zeros"
-    "model.backbone_wrapper.edge_perturbation_mode=drop_only"
-    "model.backbone_wrapper.subgraph_ratio_meaning=keep"
-    "model.readout.projection_type=linear"
 )
 
 # ── GraphMAEv2 ────────────────────────────────────────────────────────────────
@@ -369,7 +343,6 @@ for method in "${PRETRAIN_METHODS[@]}"; do
     case "${method}" in
         bgrl)       method_SWEEP+=("${bgrl_method_SWEEP[@]}") ;;
         dgi)        method_SWEEP+=("${dgi_method_SWEEP[@]}") ;;
-        graphcl)    method_SWEEP+=("${graphcl_method_SWEEP[@]}") ;;
         graphmaev2) method_SWEEP+=("${graphmaev2_method_SWEEP[@]}") ;;
         vgae)       method_SWEEP+=("${vgae_method_SWEEP[@]}") ;;
     esac
@@ -448,7 +421,6 @@ while IFS=";" read -r run_name dynamic_args_str; do
     case "${pretrain_method}" in
         bgrl)       method_fixed_args=("${bgrl_FIXED[@]}") ;;
         dgi)        method_fixed_args=("${dgi_FIXED[@]}") ;;
-        graphcl)    method_fixed_args=("${graphcl_FIXED[@]}") ;;
         graphmaev2) method_fixed_args=("${graphmaev2_FIXED[@]}") ;;
         vgae)       method_fixed_args=("${vgae_FIXED[@]}") ;;
     esac

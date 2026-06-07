@@ -1,0 +1,100 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Fine-tuning sweep configuration — TRANSDUCTIVE setting
+# Used by scripts/finetuning/sweep_transductive.py + worker_transductive.py
+#
+# Key difference from sweep_config.yaml (inductive):
+#   fractions here are fractions of TRAINING NODES (not training graphs).
+#   The full graph is always used for message passing; only the labelled
+#   subset of training nodes changes per run / seed.
+#
+#   seed_subsample is always true here: each train_seed independently
+#   resamples the labelled training-node subset.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Fine-tuning strategies ────────────────────────────────────────────────────
+#   finetune-full      pretrained weights; train everything
+#   finetune-probe     pretrained weights; freeze encoder; train readout only
+#   random-init-full   randomise ALL weights; train everything
+#   random-init-probe  randomise ALL weights; freeze encoder; train readout only
+modes:
+  - finetune-full
+  - finetune-probe
+  - random-init-full
+  - random-init-probe
+
+# ── Few-shot fractions of TRAINING NODES ──────────────────────────────────────
+# E.g. for Cora with ~1354 training nodes (train_prop=0.5):
+#   0.01  →  ~14 nodes
+#   0.05  →  ~68 nodes
+#   0.15  → ~203 nodes
+#   1.00  → all training nodes (full supervision baseline)
+fractions:
+  - 0.01   # 1%
+  - 0.05   # 5%
+  - 0.15   # 15%
+  #- 0.30  # 30%
+  #- 1.00  # 100% (full supervision baseline)
+
+# ── Downstream readout pooling ────────────────────────────────────────────────
+# For transductive node-level classification, global pooling is NOT applied;
+# predictions are made per node.  A single entry avoids redundant experiments.
+poolings:
+  - mean
+
+# ── Training ──────────────────────────────────────────────────────────────────
+max_epochs: 400
+patience: 10        # EarlyStopping patience (on dataset monitor_metric)
+
+# Fixed seed used ONLY for reproducibility logging; all subset selection is
+# controlled by train_seeds (seed_subsample is always true for transductive).
+seed: 42
+
+# Independent training seeds — each is one full repeat of the experiment.
+# With seed_subsample=true every seed also draws a DIFFERENT random subset
+# of labelled training nodes, so repeats differ in both data and init.
+train_seeds: [0, 1, 2, 3]
+
+# Transductive fine-tuning always uses seed_subsample=true: each train_seed
+# independently resamples the labelled training-node fraction.
+seed_subsample: true
+
+# W&B project suffix appended when seed_subsample=true (always here).
+seed_subsample_project_suffix: _seedsub
+
+# Batch size for fine-tuning. null = inherit from the pretrained run config.
+# For transductive datasets this is always 1 (whole graph per batch).
+batch_size: null
+
+# ── W&B projects ──────────────────────────────────────────────────────────────
+# Pretrained projects from gpse_backbone_pretrain_sweep_transductive.sh.
+# Each maps to a finetune project called finetune_<project>_seedsub.
+entity: louis-van-langendonck-universitat-polit-cnica-de-catalunya
+projects:
+  # ── GraphMAEv2 ──
+  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_cora
+  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_pubmed
+  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_minesweeper
+  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_roman_empire
+  # ── DGI ──
+  # - gpse_backbone_pretrain_sweep_transductive_dgi_cocitation_cora
+  # - gpse_backbone_pretrain_sweep_transductive_dgi_cocitation_pubmed
+  # - gpse_backbone_pretrain_sweep_transductive_dgi_minesweeper
+  # - gpse_backbone_pretrain_sweep_transductive_dgi_roman_empire
+  # ── BGRL ──
+  # - gpse_backbone_pretrain_sweep_transductive_bgrl_cocitation_cora
+  # - gpse_backbone_pretrain_sweep_transductive_bgrl_cocitation_pubmed
+  # - gpse_backbone_pretrain_sweep_transductive_bgrl_minesweeper
+  # - gpse_backbone_pretrain_sweep_transductive_bgrl_roman_empire
+  # ── VGAE ──
+  # - gpse_backbone_pretrain_sweep_transductive_vgae_cocitation_cora
+  # - gpse_backbone_pretrain_sweep_transductive_vgae_cocitation_pubmed
+  # - gpse_backbone_pretrain_sweep_transductive_vgae_minesweeper
+  # - gpse_backbone_pretrain_sweep_transductive_vgae_roman_empire
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+# Number of concurrent GPU workers.  Set to the number of available GPUs.
+num_gpus: 4
+
+# Specific GPU indices to use (null = 0,1,...,num_gpus-1)
+# Example to restrict to GPUs 0 and 2: gpu_ids: [0, 2]
+gpu_ids: null

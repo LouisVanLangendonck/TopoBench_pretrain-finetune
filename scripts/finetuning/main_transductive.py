@@ -1,8 +1,17 @@
-"""Few-shot fine-tuning of a pretrained TopoBench model from W&B.
+"""Few-shot fine-tuning of a pretrained TopoBench model — TRANSDUCTIVE setting.
 
 Loads the best pretrained checkpoint, replaces the pretraining wrapper + readout
-with a plain GNNWrapper + DownstreamReadOut, and runs four fine-tuning strategies
-at three training-data fractions.
+with a plain GNNWrapper + DownstreamReadOut, and runs fine-tuning strategies
+at several labelled-training-node fractions.
+
+Transductive vs inductive difference
+--------------------------------------
+In the inductive case (main.py) "fractions" refers to a random subset of
+training *graphs*.  Here, the dataset is a single large graph with node-level
+train / val / test masks (e.g. Cora, PubMed, Roman-Empire, Minesweeper).
+"Fractions" therefore means a random subset of training *nodes* whose labels
+are exposed to the model.  The full graph is always used for message passing.
+Val and test evaluation is always on the full held-out node sets.
 
 Fine-tuning modes
 -----------------
@@ -13,18 +22,16 @@ Fine-tuning modes
 
 Usage
 -----
-    python scripts/finetuning/main.py \\
-        --project  gin_pretrain_sweep_graphmaev2_BBB_Martins \\
+    python scripts/finetuning/main_transductive.py \\
+        --project  gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_cora \\
         --entity   <wandb-entity> \\
         [--run-id  <run-id>]           # omit → uses first (oldest) run
-        [--fractions 0.05 0.5 1.0]    # training-data fractions
+        [--fractions 0.01 0.05 0.15]  # fraction of labelled training nodes
         [--modes finetune-full finetune-probe random-init-full random-init-probe]
-        [--pooling mean]               # readout graph pooling: mean | sum | max
-        [--max-epochs 100]
-        [--patience 20]
+        [--max-epochs 400]
+        [--patience 10]
         [--device cuda:0]
         [--seed 42]
-        [--pretrain-eval]              # also re-evaluate pretraining metrics
 """
 
 from __future__ import annotations
@@ -45,6 +52,7 @@ from scripts.finetuning.utils import (
     build_datamodule,
     build_downstream_model,
     compose_cfg,
+    count_transductive_nodes,
     evaluate,
     extract_downstream_overrides,
     fetch_run,
@@ -52,7 +60,7 @@ from scripts.finetuning.utils import (
     get_downstream_monitor,
     get_hydra_overrides,
     load_model,
-    make_subset_datamodule,
+    make_subset_transductive_datamodule,
     run_finetune_experiment,
 )
 
@@ -63,34 +71,36 @@ from scripts.finetuning.utils import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Few-shot fine-tuning of a pretrained TopoBench model.",
+        description="Few-shot transductive fine-tuning of a pretrained TopoBench model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--project",  default="gpse_backbone_pretrain_sweep_bgrl_BBB_Martins")
+    p.add_argument("--project",  default="gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_cora")
     p.add_argument("--entity",   default="louis-van-langendonck-universitat-polit-cnica-de-catalunya")
     p.add_argument("--run-id",   default=None, dest="run_id",
                    help="W&B run ID. Omit to use the first run in the project.")
-    p.add_argument("--fractions", nargs="+", type=float, default=[0.05],
-                   metavar="F", help="Fractions of training data to use.")
+    p.add_argument("--fractions", nargs="+", type=float, default=[0.01, 0.05, 0.15],
+                   metavar="F",
+                   help="Fractions of labelled training NODES to use (transductive few-shot).")
     p.add_argument("--modes", nargs="+", default=FINETUNE_MODES,
                    choices=FINETUNE_MODES, metavar="MODE",
                    help="Fine-tuning modes to run.")
-    p.add_argument("--poolings", nargs="+", default=["mean", "sum"],
+    p.add_argument("--poolings", nargs="+", default=["mean"],
                    choices=["mean", "sum", "max"], metavar="POOL",
-                   help="Graph pooling options for the downstream readout.")
-    p.add_argument("--max-epochs",   type=int, default=100, dest="max_epochs")
-    p.add_argument("--patience",     type=int, default=20)
+                   help="Graph pooling option passed to DownstreamReadOut. "
+                        "For node-level transductive tasks this has no effect "
+                        "on predictions but is kept for API consistency.")
+    p.add_argument("--max-epochs",   type=int, default=400, dest="max_epochs")
+    p.add_argument("--patience",     type=int, default=10)
     p.add_argument("--seed",         type=int, default=42,
-                   help="Fixed seed for few-shot subset selection (data, not training).")
-    p.add_argument("--train-seeds",  nargs="+", type=int, default=[0, 1, 2],
+                   help="Base RNG seed (not used for subsample selection when "
+                        "seed_subsample is on).")
+    p.add_argument("--train-seeds",  nargs="+", type=int, default=[0, 1, 2, 3],
                    dest="train_seeds", metavar="S",
-                   help="Seeds for model init + training randomness (one repeat per seed).")
-    p.add_argument("--seed-subsample", action="store_true", dest="seed_subsample",
-                   help="When set, each train-seed independently resamples the training "
-                        "fraction instead of all seeds sharing the same fixed subset. "
-                        "Corresponds to seed_subsample=true in sweep_config.yaml.")
+                   help="Training seeds.  Each seed independently resamples the "
+                        "labelled training-node subset (seed_subsample=true).")
     p.add_argument("--batch-size",   type=int, default=None, dest="batch_size",
-                   help="Override batch size for fine-tuning (default: inherit from pretrain run).")
+                   help="Override batch size (default: inherit from pretrain config; "
+                        "transductive datasets use batch_size=1).")
     p.add_argument("--device",
                    default="cuda:0" if torch.cuda.is_available() else "cpu")
     p.add_argument("--no-pretrain-eval", action="store_true", dest="skip_pretrain_eval",
@@ -108,19 +118,14 @@ def _make_header(title: str, width: int = 70) -> str:
 
 
 def _print_results_table(results: dict[str, dict[str, float]]) -> None:
-    """Pretty-print a comparison table of all experiment metrics."""
     if not results:
         return
-
-    # Collect and sort metric names; strip leading "test/" prefix for display
     all_keys = sorted({k for v in results.values() for k in v})
     col_names = [k.replace("test/", "") for k in all_keys]
     col_w = max(12, *(len(c) + 2 for c in col_names))
-    row_w = 40
-
+    row_w = 44
     header = f"{'Experiment':<{row_w}}" + "".join(f"{c:>{col_w}}" for c in col_names)
     sep = "─" * len(header)
-
     print(f"\n{sep}")
     print(header)
     print(sep)
@@ -141,13 +146,13 @@ def main() -> None:
     device = torch.device(args.device)
 
     print(_make_header(f"{args.entity}/{args.project}"))
-    print(f"  run     : {args.run_id or '(first run)'}")
-    print(f"  device  : {device}")
+    print(f"  run      : {args.run_id or '(first run)'}")
+    print(f"  device   : {device}")
     print(f"  modes    : {args.modes}")
-    print(f"  fractions: {args.fractions}")
+    print(f"  fractions: {args.fractions}  (labelled training-node fractions)")
     print(f"  poolings : {args.poolings}")
-    print(f"  epochs  : {args.max_epochs}  patience={args.patience}")
-    print(f"  seed_subsample: {args.seed_subsample}")
+    print(f"  epochs   : {args.max_epochs}  patience={args.patience}")
+    print(f"  seeds    : {args.train_seeds}  (each independently resamples nodes)")
 
     # ── 1. W&B run + checkpoint ───────────────────────────────────────────────
     run = fetch_run(args.project, args.entity, args.run_id)
@@ -165,8 +170,6 @@ def main() -> None:
     print("\n[Loading pretrained model...]")
     pretrained_model = load_model(pretrain_cfg, ckpt_path, device)
 
-    # Sanity-check: re-evaluate the pretrained model on its own pretraining task
-    # to confirm loaded weights reproduce the W&B-reported best metrics.
     if not args.skip_pretrain_eval:
         print("\n[Building pretraining datamodule for sanity check...]")
         pretrain_dm = build_datamodule(pretrain_cfg)
@@ -195,38 +198,32 @@ def main() -> None:
 
     print("\n[Building downstream datamodule...]")
     datamodule = build_datamodule(downstream_cfg)
-    n_train_full = len(datamodule.dataset_train)
-    n_val = len(datamodule.dataset_val) if datamodule.dataset_val is not None else 0
-    n_test = len(datamodule.dataset_test) if datamodule.dataset_test is not None else 0
-    print(f"  splits: train={n_train_full}  val={n_val}  test={n_test}")
+
+    # For transductive datasets: report node counts from masks, not graph counts.
+    n_train_full = count_transductive_nodes(datamodule.dataset_train, "train_mask")
+    n_val  = count_transductive_nodes(datamodule.dataset_val,  "val_mask")
+    n_test = count_transductive_nodes(datamodule.dataset_test, "test_mask")
+    print(f"  node splits: train={n_train_full}  val={n_val}  test={n_test}")
+    print(f"  (full graph has {len(datamodule.dataset_train)} training-batch item(s))")
 
     # ── 4. Run all (mode × fraction × pooling × train_seed) experiments ──────
-    # seed_subsample controls whether each train_seed draws a different random
-    # subset (True) or all seeds share the same fixed subset (False / legacy).
+    # In transductive mode seed_subsample is always True:
+    # each train_seed independently resamples the labelled node subset.
     results: dict[str, dict[str, float]] = {}
 
     for mode in args.modes:
         for frac in args.fractions:
             for pooling in args.poolings:
-                # When seed_subsample is off: build subset once per (frac, pooling)
-                # so the same data is used for every train_seed (legacy behaviour).
-                if not args.seed_subsample:
-                    subset_dm = make_subset_datamodule(
-                        datamodule, frac, batch_size=args.batch_size, seed=args.seed
-                    )
-                    n_train = len(subset_dm.dataset_train)
-
                 for train_seed in args.train_seeds:
-                    # When seed_subsample is on: each train_seed draws its own
-                    # independent random subsample of the training fraction.
-                    if args.seed_subsample:
-                        subset_seed = train_seed
-                        subset_dm = make_subset_datamodule(
-                            datamodule, frac, batch_size=args.batch_size, seed=subset_seed
-                        )
-                        n_train = len(subset_dm.dataset_train)
-                    else:
-                        subset_seed = args.seed
+                    # Each train_seed draws its own random subset of training nodes.
+                    subset_dm = make_subset_transductive_datamodule(
+                        datamodule, frac,
+                        batch_size=args.batch_size,
+                        seed=train_seed,
+                    )
+                    n_train = count_transductive_nodes(
+                        subset_dm.dataset_train, "train_mask"
+                    )
 
                     exp_key = f"{mode} @ {int(frac * 100):3d}% [{pooling}] s{train_seed}"
                     print(f"\n{'─' * 60}")
@@ -243,9 +240,10 @@ def main() -> None:
                     apply_finetuning_mode(model, mode)
 
                     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-                    n_total = sum(p.numel() for p in model.parameters())
-                    print(f"  params    : {n_trainable:,} / {n_total:,} trainable")
-                    print(f"  train size: {n_train}  ({frac * 100:.0f}% of {n_train_full})")
+                    n_total     = sum(p.numel() for p in model.parameters())
+                    print(f"  params      : {n_trainable:,} / {n_total:,} trainable")
+                    print(f"  labelled    : {n_train} / {n_train_full} training nodes "
+                          f"({frac * 100:.0f}%)")
 
                     test_metrics, fit_metrics = run_finetune_experiment(
                         model=model,

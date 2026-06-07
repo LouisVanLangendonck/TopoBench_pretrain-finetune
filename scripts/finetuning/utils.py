@@ -430,25 +430,24 @@ def build_downstream_model(
     residual = pw.residual_connections
     num_cell_dims = len(list(pw.dimensions))  # range → int
 
-    # ── 2. GNN wrapper — selected by backbone class, not dataset attributes ──────
-    # Keying off the backbone *class* is the only reliable signal: a dataset with
-    # edge features would give GIN a truthy `edge_dim` attribute even though GIN
-    # never uses edge features, causing a false positive.
-    from topobench.nn.backbones.graph.gpse_backbone import GPSEBackbone
-    try:
-        from torch_geometric.nn.models import GIN as _GIN
-    except ImportError:
-        _GIN = None  # type: ignore[assignment,misc]
+    # ── 2. GNN wrapper — selected by backbone class name ──────────────────────
+    # We match on the class *name* string rather than isinstance() to avoid
+    # Python's module-identity trap: Hydra instantiates classes via its own
+    # import path, which can produce a different class object than a local
+    # import — making isinstance() return False even when the names match.
+    backbone_cls_name = type(gnn_encoder).__name__
+    _EDGE_ATTR_BACKBONES = {"GPSEBackbone"}
+    _PLAIN_BACKBONES     = {"GIN"}
 
-    if isinstance(gnn_encoder, GPSEBackbone):
+    if backbone_cls_name in _EDGE_ATTR_BACKBONES:
         WrapperCls = EdgeAttrGNNWrapper
-    elif _GIN is not None and isinstance(gnn_encoder, _GIN):
+    elif backbone_cls_name in _PLAIN_BACKBONES:
         WrapperCls = GNNWrapper
     else:
         raise NotImplementedError(
-            f"Backbone type {type(gnn_encoder).__name__!r} has no explicit wrapper "
-            "mapping in build_downstream_model(). Add it before using this backbone "
-            "for fine-tuning."
+            f"Backbone type {backbone_cls_name!r} has no explicit wrapper "
+            "mapping in build_downstream_model(). Add it to _EDGE_ATTR_BACKBONES "
+            "or _PLAIN_BACKBONES before using this backbone for fine-tuning."
         )
     new_wrapper = WrapperCls(
         backbone=gnn_encoder,
@@ -617,6 +616,181 @@ def make_subset_datamodule(
         dataset_train=dataset_train,
         dataset_val=full_datamodule.dataset_val,
         dataset_test=full_datamodule.dataset_test,
+        batch_size=effective_bs,
+        num_workers=full_datamodule.num_workers,
+        pin_memory=full_datamodule.pin_memory,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Transductive few-shot: subset by masking training nodes
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _MaskedGraphDataset(torch.utils.data.Dataset):
+    """Single-element Dataset wrapping a transductive graph with a modified mask.
+
+    Used by :func:`make_subset_transductive_datamodule` to present a
+    ``train_mask``-narrowed graph to ``TBDataloader`` without copying the
+    underlying edge/feature tensors (only the mask tensor is new).
+    """
+
+    def __init__(self, data) -> None:
+        self._data = data
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, idx):
+        return self._data
+
+
+def _get_transductive_data(dataset):
+    """Extract the underlying ``torch_geometric.data.Data`` object from a transductive dataset.
+
+    ``DataloadDataset.__getitem__`` (inherited from PyG's ``Dataset``) calls
+    ``self.get(idx)`` which returns a ``(values_list, keys_list)`` tuple — not a
+    ``Data`` object.  The real ``Data`` lives in ``dataset.data_lst[0]``.
+    """
+    if hasattr(dataset, "data_lst"):
+        return dataset.data_lst[0]
+    if hasattr(dataset, "data_list"):
+        return dataset.data_list[0]
+    # Last resort: try direct indexing (may work for plain lists)
+    item = dataset[0]
+    if hasattr(item, "train_mask") or hasattr(item, "edge_index"):
+        return item
+    raise TypeError(
+        f"Cannot extract a Data object from dataset of type {type(dataset)}. "
+        "Expected a DataloadDataset with a 'data_lst' attribute."
+    )
+
+
+def count_transductive_nodes(dataset, mask_attr: str = "train_mask") -> int:
+    """Count True entries in a node mask for a single-graph transductive dataset.
+
+    For 2-D masks (k-fold splits) only the first column is counted.
+    Falls back to 0 on any error so callers never crash.
+
+    Parameters
+    ----------
+    dataset :
+        A ``DataloadDataset`` (or compatible) whose first element is a
+        ``torch_geometric.data.Data`` object.
+    mask_attr : str
+        Name of the boolean mask attribute on the ``Data`` object.
+    """
+    try:
+        data = _get_transductive_data(dataset)
+        mask = getattr(data, mask_attr, None)
+        if mask is None:
+            return 0
+        if mask.dim() == 2:
+            mask = mask[:, 0]
+        return int(mask.sum().item())
+    except Exception:
+        return 0
+
+
+def make_subset_transductive_datamodule(
+    full_datamodule,
+    train_fraction: float,
+    batch_size: int | None = None,
+    seed: int = 0,
+) -> Any:
+    """Return a datamodule where only a random fraction of training *nodes* are labelled.
+
+    Unlike :func:`make_subset_datamodule` (which subsets training *graphs* for
+    inductive multi-graph settings), this function targets transductive datasets
+    where a single graph is used for all splits.
+
+    The full graph — all nodes and edges — is always visible to the GNN for
+    message passing.  Only ``train_mask`` is narrowed: a randomly selected
+    ``train_fraction`` of the original training nodes remain ``True``; their
+    labels drive the loss while the rest are unlabelled.  ``val_mask`` and
+    ``test_mask`` are never modified, so evaluation always uses the full
+    held-out sets.
+
+    Parameters
+    ----------
+    full_datamodule : TBDataloader
+        Datamodule built from the transductive downstream config.  Must have
+        exactly one training graph (``len(dataset_train) == 1``).
+    train_fraction : float
+        Fraction of training nodes to retain as labelled (0 < f ≤ 1).
+    batch_size : int | None
+        Override the batch size.  ``None`` inherits from *full_datamodule*.
+    seed : int
+        RNG seed for reproducible node selection.
+
+    Returns
+    -------
+    TBDataloader
+        New datamodule whose ``dataset_train`` contains the single graph
+        with a narrowed ``train_mask`` (all other graph attributes unchanged).
+    """
+    from topobench.dataloader import TBDataloader
+
+    effective_bs = batch_size if batch_size is not None else full_datamodule.batch_size
+
+    if train_fraction >= 1.0:
+        return TBDataloader(
+            dataset_train=full_datamodule.dataset_train,
+            dataset_val=full_datamodule.dataset_val,
+            dataset_test=full_datamodule.dataset_test,
+            batch_size=effective_bs,
+            num_workers=full_datamodule.num_workers,
+            pin_memory=full_datamodule.pin_memory,
+        )
+
+    from topobench.dataloader.dataload_dataset import DataloadDataset
+
+    n_graphs = len(full_datamodule.dataset_train)
+    if n_graphs != 1:
+        raise ValueError(
+            "make_subset_transductive_datamodule expects a single-graph "
+            f"training dataset (batch_size=1), but got {n_graphs} graphs. "
+            "Use make_subset_datamodule for inductive (multi-graph) datasets."
+        )
+
+    # Access the real Data object via data_lst (DataloadDataset.get() returns a
+    # (values, keys) tuple, not a Data object, so dataset[0] doesn't work here).
+    # Deep-copy so the original stored Data is never mutated.
+    data = copy.deepcopy(_get_transductive_data(full_datamodule.dataset_train))
+
+    # Support both 1-D (single split) and 2-D (k-fold) train masks.
+    train_mask = data.train_mask
+    is_2d = train_mask.dim() == 2
+    mask_1d = train_mask[:, 0] if is_2d else train_mask
+
+    train_node_indices = torch.where(mask_1d)[0]
+    n_train = len(train_node_indices)
+    n_keep = max(1, int(n_train * train_fraction))
+
+    g = torch.Generator()
+    g.manual_seed(seed)
+    perm = torch.randperm(n_train, generator=g)
+    keep_global = train_node_indices[perm[:n_keep]]
+
+    new_mask_1d = torch.zeros_like(mask_1d)
+    new_mask_1d[keep_global] = True
+
+    if is_2d:
+        new_train_mask = train_mask.clone()
+        new_train_mask[:, 0] = new_mask_1d
+        data.train_mask = new_train_mask
+    else:
+        data.train_mask = new_mask_1d
+
+    # Wrap in a fresh DataloadDataset and let TBDataloader handle the transductive
+    # convention: passing dataset_val=None, dataset_test=None causes TBDataloader
+    # to set val=test=train, so the same (single) graph — with all three masks
+    # intact — is used for all phases.  TBModel.process_outputs then applies
+    # train_mask / val_mask / test_mask per phase automatically.
+    subset_ds = DataloadDataset([data])
+    return TBDataloader(
+        dataset_train=subset_ds,
+        dataset_val=None,
+        dataset_test=None,
         batch_size=effective_bs,
         num_workers=full_datamodule.num_workers,
         pin_memory=full_datamodule.pin_memory,
