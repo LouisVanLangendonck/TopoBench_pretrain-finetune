@@ -41,8 +41,10 @@ import pandas as pd
 from scripts.plotting.shared_baseline import apply_shared_random_init_baseline
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DEFAULT_INPUT     = _SCRIPT_DIR / "outputs" / "aggregated_results.csv"
-DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "outputs" / "figures"
+_OUTPUTS_BASE     = _SCRIPT_DIR / "outputs"
+MODELS            = ("gin", "gpse_backbone")
+DEFAULT_INPUT      = None   # resolved at runtime from --model
+DEFAULT_OUTPUT_DIR = None   # resolved at runtime from --model
 
 # ── Column names ──────────────────────────────────────────────────────────────
 COL_DATASET    = "pretrained_config_dataset.loader.parameters.data_name"
@@ -88,6 +90,31 @@ GROUP_MARKERS: dict[str, str] = {
     "from_scratch": "s",
 }
 
+# ── Combined GIN + GPSE colour palette ───────────────────────────────────────
+# GIN   → lighter shades; GPSE → darker shades of the same hue families.
+_MODEL_GROUP_COLORS: dict[str, dict[str, str]] = {
+    "gin": {
+        "pretrained":   "#6AACE8",   # light blue
+        "from_scratch": "#F5B87A",   # light orange
+    },
+    "gpse_backbone": {
+        "pretrained":   "#004C88",   # dark blue
+        "from_scratch": "#BB5500",   # dark orange
+    },
+}
+MODEL_DISPLAY: dict[str, str] = {
+    "gin":           "GIN",
+    "gpse_backbone": "GPSE",
+}
+
+
+def _combined_mode_color(mode: str, model: str) -> str:
+    """Return the colour for a (ft_mode, model) pair in combined plots."""
+    palette = _MODEL_GROUP_COLORS.get(model, _MODEL_GROUP_COLORS["gpse_backbone"])
+    if mode.startswith("finetune"):
+        return palette["pretrained"]
+    return palette["from_scratch"]
+
 
 def _mode_color(mode: str) -> str:
     if mode.startswith("finetune"):
@@ -126,6 +153,36 @@ PRETRAIN_DISPLAY: dict[str, str] = {
     "grace":      "GRACE",
     "mvgrl":      "MVGRL",
     "dgmae":      "DGMAE",
+}
+
+# Whether the evaluation set uses scaffold splitting (True) or random splitting (False).
+# ADME benchmark datasets and ogbg-molhiv are scaffold-split; the rest are random.
+SCAFFOLD_SPLIT_DATASETS: dict[str, bool] = {
+    "BBB_Martins":             True,   # ADME benchmark
+    "Caco2_Wang":              True,   # ADME benchmark
+    "Clearance_Hepatocyte_AZ": True,   # ADME benchmark
+    "CYP3A4_Veith":            True,   # ADME benchmark
+    "ogbg-molhiv":             True,   # OGB scaffold split
+    "IMDB-BINARY":             False,
+    "REDDIT-BINARY":           False,
+    "MUTAG":                   False,
+    "ogbg-molbace":            False,
+    "PROTEINS":                False,
+}
+
+# Dataset domain category, encoded as a float for scatter-plot x-axes.
+# 0 = Molecular  ·  1 = Social / Platform  ·  2 = Protein structure
+DATASET_DOMAIN: dict[str, float] = {
+    "BBB_Martins":             0.0,   # molecular
+    "Caco2_Wang":              0.0,   # molecular
+    "Clearance_Hepatocyte_AZ": 0.0,   # molecular
+    "CYP3A4_Veith":            0.0,   # molecular
+    "ogbg-molhiv":             0.0,   # molecular
+    "ogbg-molbace":            0.0,   # molecular
+    "MUTAG":                   0.0,   # molecular
+    "IMDB-BINARY":             1.0,   # social / platform
+    "REDDIT-BINARY":           1.0,   # social / platform
+    "PROTEINS":                2.0,   # protein structure
 }
 
 # ── Matplotlib global style ───────────────────────────────────────────────────
@@ -829,6 +886,9 @@ GRAPH_PROPERTIES: list[tuple[str, str]] = [
     ("spectral_radius_std",           "Spectral radius (std)"),
     ("num_connected_components_mean", "Components (mean)"),
     ("num_connected_components_std",  "Components (std)"),
+    # ── dataset-level metadata ─────────────────────────────────────────────
+    ("scaffold_split",                "Scaffold split (1=yes, 0=no)"),
+    ("dataset_domain",                "Domain (0=mol, 1=social, 2=protein)"),
 ]
 PROPS_PER_PLOT = 6   # 2 rows × 3 cols
 
@@ -1047,7 +1107,12 @@ def plot_dataset_percentage(
 # ── Property-correlation scatter plots ────────────────────────────────────────
 
 def load_metadata(metadata_dir: Path) -> dict[str, dict]:
-    """Load *.json files from metadata_dir. Returns {dataset_name: train_props}."""
+    """Load *.json files from metadata_dir. Returns {dataset_name: train_props}.
+
+    Injects ``scaffold_split`` (1.0 / 0.0) from ``SCAFFOLD_SPLIT_DATASETS`` for
+    each dataset so it can be used as a correlation variable alongside graph
+    structural properties.
+    """
     import json
     result: dict[str, dict] = {}
     if not metadata_dir.is_dir():
@@ -1058,9 +1123,74 @@ def load_metadata(metadata_dir: Path) -> dict[str, dict]:
         except Exception:
             continue
         train = data.get("train", {})
-        result[p.stem] = {k: v for k, v in train.items()
-                          if k not in ("num_graphs", "total_num_nodes")}
+        props = {k: v for k, v in train.items()
+                 if k not in ("num_graphs", "total_num_nodes")}
+        props["scaffold_split"] = 1.0 if SCAFFOLD_SPLIT_DATASETS.get(p.stem, False) else 0.0
+        props["dataset_domain"] = DATASET_DOMAIN.get(p.stem, 0.0)
+        result[p.stem] = props
     return result
+
+
+def load_metadata_all_splits(metadata_dir: Path) -> dict[str, dict]:
+    """Load *.json files, returning all three splits per dataset.
+
+    Returns ``{dataset_name: {"train": {...}, "val": {...}, "test": {...}}}``.
+    """
+    import json
+    result: dict[str, dict] = {}
+    if not metadata_dir.is_dir():
+        return result
+    _skip = {"num_graphs", "total_num_nodes"}
+    for p in metadata_dir.glob("*.json"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        result[p.stem] = {
+            split: {k: v for k, v in data.get(split, {}).items() if k not in _skip}
+            for split in ("train", "val", "test")
+        }
+    return result
+
+
+def _compute_split_shift_metadata(
+    metadata_all: dict[str, dict],
+) -> tuple[dict[str, dict], dict[str, dict]]:
+    """Compute per-property absolute split-mean differences from all-splits metadata.
+
+    Only properties whose key ends with ``_mean`` are included (std-of-property
+    and count columns are skipped).  Values are absolute differences so the
+    x-axis always represents the magnitude of distribution shift.
+
+    Returns
+    -------
+    train_val_meta : dict[str, dict]
+        ``{dataset: {prop_key: |train_mean - val_mean|}}``.
+    val_test_meta : dict[str, dict]
+        ``{dataset: {prop_key: |val_mean - test_mean|}}``.
+    """
+    train_val: dict[str, dict] = {}
+    val_test:  dict[str, dict] = {}
+    for ds, splits in metadata_all.items():
+        train = splits.get("train", {})
+        val   = splits.get("val",   {})
+        test  = splits.get("test",  {})
+        mean_keys = [k for k in set(train) | set(val) | set(test)
+                     if k.endswith("_mean")]
+        tv, vt = {}, {}
+        for key in mean_keys:
+            t_v  = train.get(key)
+            v_v  = val.get(key)
+            te_v = test.get(key)
+            if t_v is not None and v_v is not None:
+                tv[key] = abs(t_v - v_v)
+            if v_v is not None and te_v is not None:
+                vt[key] = abs(v_v - te_v)
+        if tv:
+            train_val[ds] = tv
+        if vt:
+            val_test[ds] = vt
+    return train_val, val_test
 
 
 def _build_diff_records(
@@ -1147,24 +1277,77 @@ def _build_diff_records(
     return pd.DataFrame(records)
 
 
+def _build_frac_avg_diff_records(diff_df: pd.DataFrame) -> pd.DataFrame:
+    """Average norm_diff over fractions for each (dataset, pretrain_method, scope).
+
+    Useful for producing a single correlation point per (dataset, method) pair
+    that summarises the pretraining advantage across all data-fraction settings.
+
+    norm_err is propagated in quadrature then divided by K
+    (matches the averaging convention used in ``plot_average_improvement``):
+        err_avg = sqrt(Σ err_i²) / K
+    """
+    records = []
+    for (ds, method, scope), grp in diff_df.groupby(
+        ["dataset", "pretrain_method", "scope"]
+    ):
+        valid = grp["norm_diff"].notna()
+        vals  = grp.loc[valid, "norm_diff"].values
+        errs  = grp.loc[valid, "norm_err"].values
+        K = len(vals)
+        if K == 0:
+            continue
+        records.append(dict(
+            dataset=str(ds),
+            pretrain_method=str(method),
+            scope=str(scope),
+            fraction=np.nan,
+            diff=float(grp["diff"].dropna().mean()) if "diff" in grp.columns else np.nan,
+            norm_diff=float(vals.mean()),
+            norm_err=float(np.sqrt((errs ** 2).sum())) / K,
+        ))
+    return pd.DataFrame(records)
+
+
 def plot_property_correlations(
     df: pd.DataFrame,
     metadata: dict[str, dict],
     output_dir: Path,
     fmt: str = "png",
     datasets: list[str] | None = None,
+    x_label_suffix: str = "",
+    title_extra: str = "",
+    fname_prefix: str = "corr",
+    pool_fractions: bool = False,
+    prebuilt_diff_df: pd.DataFrame | None = None,
 ) -> None:
     """For each (fraction, scope) and each group of 6 graph properties: one 2×3 figure.
 
-    X-axis : graph property value (mean or std, from train-split metadata).
+    X-axis : graph property value (or split difference when ``x_label_suffix`` is set).
     Y-axis : sign·(finetune − random_init) / σ_dataset
              [dataset-std-normalised performance difference, ± propagated stderr].
     Each point: one (dataset, pretraining_method) combo.
     Colour  : pretraining method.
+
+    Parameters
+    ----------
+    x_label_suffix : str
+        Appended to each property axis label (e.g. ``" (train−val diff)"``).
+    title_extra : str
+        Extra text appended to each figure's suptitle.
+    fname_prefix : str
+        Filename stem prefix; default ``"corr"`` → ``corr_frac…``.
+    pool_fractions : bool
+        When True, all fractions are combined into a single plot per scope
+        (one figure per scope per property group instead of one per fraction).
+    prebuilt_diff_df : pd.DataFrame or None
+        If provided, skip the internal ``_build_diff_records`` call and use
+        this DataFrame directly (e.g. fraction-averaged records).
     """
     _datasets = datasets or sorted(df[COL_DATASET].dropna().unique())
 
-    diff_df = _build_diff_records(df, _datasets)
+    diff_df = prebuilt_diff_df if prebuilt_diff_df is not None \
+              else _build_diff_records(df, _datasets)
     if diff_df.empty:
         print("  no diff records to plot")
         return
@@ -1179,22 +1362,38 @@ def plot_property_correlations(
     ds_marker = {d: _SCATTER_MARKERS[i % len(_SCATTER_MARKERS)]
                  for i, d in enumerate(all_ds)}
 
-    # Property groups
-    prop_groups = [GRAPH_PROPERTIES[i:i + PROPS_PER_PLOT]
-                   for i in range(0, len(GRAPH_PROPERTIES), PROPS_PER_PLOT)]
+    # Only keep properties that exist in at least one dataset's metadata dict.
+    # This automatically drops _std entries when the metadata only carries _mean
+    # keys (e.g. split-shift metadata), avoiding blank panels.
+    _avail_keys: set[str] = set()
+    for _ds_props in metadata.values():
+        _avail_keys.update(_ds_props.keys())
+    _active_props = [(k, lbl) for k, lbl in GRAPH_PROPERTIES if k in _avail_keys]
+    prop_groups = [_active_props[i:i + PROPS_PER_PLOT]
+                   for i in range(0, len(_active_props), PROPS_PER_PLOT)]
 
-    fractions = sorted(diff_df["fraction"].unique())
-    scopes    = sorted(diff_df["scope"].unique())
+    scopes = sorted(diff_df["scope"].unique())
+    # When pooling, fractions collapse to a single sentinel None
+    fractions = [None] if pool_fractions else sorted(
+        diff_df["fraction"].dropna().unique()
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for frac in fractions:
         for scope in scopes:
-            subset = diff_df[(diff_df["fraction"] == frac) & (diff_df["scope"] == scope)]
+            if frac is None:
+                subset = diff_df[diff_df["scope"] == scope]
+            else:
+                subset = diff_df[
+                    (diff_df["fraction"] == frac) & (diff_df["scope"] == scope)
+                ]
             if subset.empty:
                 continue
 
             scope_label = "Probe" if scope == "probe" else "Full FT"
+            frac_label  = "all fractions" if frac is None else f"fraction = {frac:g}"
+            fname_frac  = "" if frac is None else f"_frac{frac:g}"
 
             for gi, prop_group in enumerate(prop_groups):
                 n_props = len(prop_group)
@@ -1238,7 +1437,7 @@ def plot_property_correlations(
                                             capthick=1.0, elinewidth=1.0,
                                             zorder=3)
 
-                        ax.set_xlabel(prop_label, fontsize=9)
+                        ax.set_xlabel(prop_label + x_label_suffix, fontsize=9)
                         if pc == 0:
                             ax.set_ylabel("Δ perf. (dataset σ units)", fontsize=9)
                         ax.tick_params(labelsize=8)
@@ -1272,13 +1471,14 @@ def plot_property_correlations(
                     else:
                         fig.tight_layout(rect=(0, 0, 1, 0.95))
 
+                    _title_extra = f"  ·  {title_extra}" if title_extra else ""
                     fig.suptitle(
-                        f"Pretraining advantage vs graph properties  "
-                        f"·  {scope_label}  ·  fraction = {frac:g}",
+                        f"Pretraining advantage vs graph properties{_title_extra}"
+                        f"  ·  {scope_label}  ·  {frac_label}",
                         fontsize=12, fontweight="bold", y=0.99,
                     )
 
-                    fname = f"corr_frac{frac:g}_{scope}_props{gi + 1}.{fmt}"
+                    fname = f"{fname_prefix}{fname_frac}_{scope}_props{gi + 1}.{fmt}"
                     out_path = output_dir / fname
                     fig.savefig(out_path, bbox_inches="tight",
                                 dpi=200 if fmt == "png" else None)
@@ -1531,17 +1731,1173 @@ def plot_average_improvement(
         print(f"  saved → {out_path}")
 
 
+# ── Per-fraction bar-chart plots ─────────────────────────────────────────────
+
+# Reuse scatter colors for bar charts (one color per pretrain method)
+PRETRAIN_BAR_COLORS: dict[str, str] = PRETRAIN_SCATTER_COLORS
+FROM_SCRATCH_COLOR                  = "#888888"   # neutral gray for random-init bars
+_BAR_DS_PER_ROW                     = 3           # dataset panels per row
+
+
+def _get_from_scratch_bar(
+    sub: pd.DataFrame,
+    mc: str,
+    sc: str,
+    fraction: float,
+    scope: str | None,
+) -> dict[str, tuple]:
+    """Return {scope_key: (mean, stderr)} for random-init modes at *fraction*.
+
+    Values are averaged over all pretrain-method rows (they should be identical
+    after ``apply_shared_random_init_baseline`` but averaging is a safe fallback).
+    Returns ``(None, None)`` tuples when data is missing.
+    """
+    result: dict[str, tuple] = {}
+    _scopes = ["probe", "full"] if scope is None else [scope]
+    for s in _scopes:
+        ft_mode = f"random-init-{s}"
+        rows = sub[(sub[COL_FRACTION] == fraction) & (sub[COL_FT_MODE] == ft_mode)]
+        if rows.empty or mc not in rows.columns:
+            result[s] = (None, None)
+            continue
+        means = rows[mc].dropna()
+        if means.empty:
+            result[s] = (None, None)
+            continue
+        mean_v = float(means.mean())
+        if sc in rows.columns:
+            stds = rows[sc].fillna(0.0).values
+            ns   = (rows[COL_SEED_COUNT].values
+                    if COL_SEED_COUNT in rows.columns
+                    else np.full(len(rows), 3))
+            ses  = stds / np.sqrt(np.maximum(ns.astype(float), 1.0))
+            se_v = float(np.sqrt((ses ** 2).sum())) / max(len(ses), 1)
+        else:
+            se_v = 0.0
+        result[s] = (mean_v, se_v)
+    return result
+
+
+def _bar_layout(n_sub: int) -> tuple[float, float, np.ndarray]:
+    """Return (bar_w, group_w, sub_offsets) for *n_sub* bars per x-group."""
+    bar_w      = min(0.38, max(0.16, 0.72 / n_sub))
+    group_w    = n_sub * bar_w + 0.22
+    sub_offsets = np.array(
+        [i * bar_w - (n_sub - 1) * bar_w / 2.0 for i in range(n_sub)]
+    )
+    return bar_w, group_w, sub_offsets
+
+
+def plot_all_datasets_bars_frac(
+    df: pd.DataFrame,
+    output_dir: Path,
+    fmt: str = "png",
+    datasets: list[str] | None = None,
+    fraction: float = 0.01,
+    scope: str | None = None,
+    pct: bool = False,
+) -> Path | None:
+    """Bar chart showing performance at a fixed data fraction.
+
+    Layout: one panel per dataset, arranged ≤ ``_BAR_DS_PER_ROW`` per row.
+    X-axis  : pretrain methods + one "From Scratch" group.
+    Y-axis  : raw metric (or %, when *pct* is True).
+    Colors  : one distinct color per pretrain method; gray for From Scratch.
+    Scope   : when ``None`` two sub-bars per group (probe=solid, full=hatched);
+              otherwise one bar per group.
+    Error bars: ±stderr on every bar.
+
+    Parameters
+    ----------
+    pct : bool
+        When True, normalise each dataset's y-axis to [0, 100 %] using the
+        same best/worst calibration as ``plot_all_datasets_percentage``.
+    """
+    from matplotlib.patches import Patch
+
+    _datasets = datasets or sorted(df[COL_DATASET].dropna().unique())
+    _datasets  = [d for d in _datasets if not df[df[COL_DATASET] == d].empty]
+    if not _datasets:
+        return None
+
+    _scopes = ["probe", "full"] if scope is None else [scope]
+    n_sub   = len(_scopes)
+    bar_w, group_w, sub_offsets = _bar_layout(n_sub)
+
+    N      = len(_datasets)
+    n_cols = min(N, _BAR_DS_PER_ROW)
+    n_rows = math.ceil(N / n_cols)
+
+    cell_w = max(4.0, 1.5 * (len(df[COL_PRETRAIN].dropna().unique()) + 1))
+    cell_h = 3.8
+    fig_w  = max(cell_w * n_cols, 6.0)
+    fig_h  = cell_h * n_rows + 1.4
+
+    with mpl.rc_context(RC_PARAMS):
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(fig_w, fig_h),
+            squeeze=False,
+            sharey=False,
+        )
+
+        for di, dataset in enumerate(_datasets):
+            ri, ci = divmod(di, n_cols)
+            ax = axes[ri][ci]
+
+            sub = df[df[COL_DATASET] == dataset].copy()
+
+            # Monitor info
+            monitor_test_col: str | None = None
+            monitor_metric: str = "metric"
+            monitor_mode: str   = "max"
+            if COL_MON_COL in sub.columns:
+                v = sub[COL_MON_COL].dropna()
+                if not v.empty:
+                    monitor_test_col = str(v.iloc[0])
+            if COL_MON_METRIC in sub.columns:
+                v = sub[COL_MON_METRIC].dropna()
+                if not v.empty:
+                    monitor_metric = str(v.iloc[0])
+            if COL_MON_MODE in sub.columns:
+                v = sub[COL_MON_MODE].dropna()
+                if not v.empty:
+                    monitor_mode = str(v.iloc[0])
+
+            if monitor_test_col is None:
+                ax.set_visible(False)
+                continue
+
+            mc = _mean_col(monitor_test_col)
+            sc = mc.replace("_mean", "_std")
+            if mc not in sub.columns:
+                ax.set_visible(False)
+                continue
+
+            # Percentage normalisation params (if pct=True)
+            best_val: float | None = None
+            worst_val: float | None = None
+            if pct:
+                norm = _dataset_norm_params(df, dataset)
+                if norm is None:
+                    ax.set_visible(False)
+                    continue
+                best_val, worst_val, _, _ = norm
+
+            def _to_y(v: float) -> float:
+                return _to_pct(v, best_val, worst_val) if pct else v  # type: ignore[arg-type]
+
+            def _to_ye(se: float) -> float:
+                return _to_pct_stderr(se, best_val, worst_val) if pct else se  # type: ignore[arg-type]
+
+            # Methods with finetune data at this fraction
+            frac_sub  = sub[sub[COL_FRACTION] == fraction]
+            ft_methods = sorted(
+                frac_sub[
+                    frac_sub[COL_FT_MODE].str.startswith("finetune")
+                ][COL_PRETRAIN].dropna().unique()
+            )
+            if not ft_methods:
+                ax.set_visible(False)
+                continue
+
+            n_groups  = len(ft_methods) + 1   # +1 for From Scratch
+            x_centers = np.arange(n_groups, dtype=float) * group_w
+            all_y: list[float] = []
+
+            # ── Pretrain-method bars ──────────────────────────────────────────
+            for gi, method in enumerate(ft_methods):
+                method_sub = sub[sub[COL_PRETRAIN] == method]
+                color = PRETRAIN_BAR_COLORS.get(method, f"C{gi}")
+                x_c   = x_centers[gi]
+
+                for si, s in enumerate(_scopes):
+                    rows = method_sub[
+                        (method_sub[COL_FRACTION] == fraction) &
+                        (method_sub[COL_FT_MODE] == f"finetune-{s}")
+                    ]
+                    if rows.empty or mc not in rows.columns:
+                        continue
+                    y_raw = float(rows[mc].iloc[0])
+                    if np.isnan(y_raw):
+                        continue
+                    n_s  = int(rows[COL_SEED_COUNT].iloc[0]) if COL_SEED_COUNT in rows.columns else 3
+                    se_r = (float(rows[sc].iloc[0]) / np.sqrt(max(n_s, 1))
+                            if sc in rows.columns else 0.0)
+                    y_v  = _to_y(y_raw)
+                    ye_v = _to_ye(se_r)
+                    hatch = "////" if s == "full" else None
+                    x_pos = x_c + sub_offsets[si]
+                    ax.bar(x_pos, y_v, bar_w * 0.92,
+                           color=color, alpha=0.85,
+                           hatch=hatch,
+                           edgecolor="0.95" if hatch is None else "0.4",
+                           linewidth=0.4, zorder=2)
+                    ax.errorbar(x_pos, y_v, yerr=ye_v,
+                                fmt="none", color="0.15",
+                                capsize=3, capthick=0.8, elinewidth=0.8, zorder=3)
+                    all_y += [y_v + ye_v, y_v - ye_v]
+
+            # ── From Scratch bar (gray, shared) ───────────────────────────────
+            fs_data = _get_from_scratch_bar(sub, mc, sc, fraction, scope)
+            x_c = x_centers[-1]
+            for si, s in enumerate(_scopes):
+                mv, se_r = fs_data.get(s, (None, None))
+                if mv is None:
+                    continue
+                y_v  = _to_y(mv)
+                ye_v = _to_ye(se_r)
+                hatch = "////" if s == "full" else None
+                x_pos = x_c + sub_offsets[si]
+                ax.bar(x_pos, y_v, bar_w * 0.92,
+                       color=FROM_SCRATCH_COLOR, alpha=0.75,
+                       hatch=hatch,
+                       edgecolor="0.95" if hatch is None else "0.5",
+                       linewidth=0.4, zorder=2)
+                ax.errorbar(x_pos, y_v, yerr=ye_v,
+                            fmt="none", color="0.15",
+                            capsize=3, capthick=0.8, elinewidth=0.8, zorder=3)
+                all_y += [y_v + ye_v, y_v - ye_v]
+
+            # X-ticks
+            ax.set_xticks(x_centers)
+            ax.set_xticklabels(
+                [_pretrain_label(m) for m in ft_methods] + ["From\nScratch"],
+                rotation=35, ha="right", fontsize=7,
+            )
+            ax.set_title(dataset, fontsize=9, fontweight="bold")
+
+            if pct:
+                ax.set_ylabel("Performance (%)", fontsize=8)
+            else:
+                ax.set_ylabel(_metric_ylabel(str(monitor_metric), str(monitor_mode)), fontsize=8)
+
+            if all_y:
+                lo, hi = min(all_y), max(all_y)
+                pad = (hi - lo) * 0.12 if hi > lo else abs(hi) * 0.06 + 0.01
+                ax.set_ylim(lo - pad, hi + pad * 2)
+                if pct:
+                    ax.set_ylim(max(0.0, lo - pad), min(100.0, hi + pad * 2))
+            ax.tick_params(labelsize=7)
+            ax.set_xlim(-group_w * 0.5, x_centers[-1] + group_w * 0.6)
+
+        # ── Hide unused panels ────────────────────────────────────────────────
+        for ei in range(N, n_rows * n_cols):
+            ri, ci = divmod(ei, n_cols)
+            axes[ri][ci].set_visible(False)
+
+        # ── Legend ────────────────────────────────────────────────────────────
+        all_methods_in_df = sorted(df[COL_PRETRAIN].dropna().unique())
+        method_handles = [
+            Patch(facecolor=PRETRAIN_BAR_COLORS.get(m, f"C{i}"), alpha=0.85,
+                  label=_pretrain_label(m))
+            for i, m in enumerate(all_methods_in_df)
+        ]
+        fs_handle = Patch(facecolor=FROM_SCRATCH_COLOR, alpha=0.75, label="From Scratch")
+        scope_handles: list = []
+        if scope is None:
+            scope_handles = [
+                Patch(facecolor="0.6", hatch=None,   edgecolor="0.4", lw=0.5, label="Probe head"),
+                Patch(facecolor="0.6", hatch="////", edgecolor="0.5", lw=0.5, label="Full fine-tune"),
+            ]
+        all_handles = method_handles + [fs_handle] + scope_handles
+        if all_handles:
+            fig.legend(handles=all_handles, loc="lower center",
+                       ncol=min(len(all_handles), 5),
+                       fontsize=8, frameon=True, bbox_to_anchor=(0.5, 0.0))
+            fig.tight_layout(rect=(0, 0.10, 1, 0.97))
+        else:
+            fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+        scope_str = (" (probe head)" if scope == "probe"
+                     else " (full fine-tune)" if scope == "full" else "")
+        pct_str   = " [%]" if pct else ""
+        fig.suptitle(
+            f"Performance{pct_str} at fraction = {fraction:g} — all datasets{scope_str}",
+            fontsize=12, fontweight="bold", y=0.995,
+        )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stem_scope = "" if scope is None else f"_{scope}"
+        stem_pct   = "_pct" if pct else ""
+        stem       = f"all_datasets{stem_pct}{stem_scope}"
+        out_path   = output_dir / f"{stem}.{fmt}"
+        fig.savefig(out_path, bbox_inches="tight", dpi=200 if fmt == "png" else None)
+        plt.close(fig)
+        print(f"  saved → {out_path}")
+        return out_path
+
+
+def plot_all_datasets_bars_frac_combined(
+    df_gin: pd.DataFrame,
+    df_gpse: pd.DataFrame,
+    output_dir: Path,
+    fmt: str = "png",
+    datasets: list[str] | None = None,
+    fraction: float = 0.01,
+    scope: str | None = None,
+    pct: bool = False,
+) -> Path | None:
+    """Combined GIN + GPSE bar chart at a fixed data fraction.
+
+    Same panel layout as ``plot_all_datasets_bars_frac`` but each x-group has
+    sub-bars for both models:
+    - scope is not None → 2 sub-bars: GIN (lighter alpha), GPSE (full alpha)
+    - scope is None     → 4 sub-bars: GIN-probe, GIN-full, GPSE-probe, GPSE-full
+    From Scratch also has one sub-bar per model (×scope).
+    GIN bars are drawn with alpha=0.60; GPSE bars with alpha=1.0.
+    Full fine-tune bars are additionally hatched with ``////``.
+
+    Parameters
+    ----------
+    pct : bool
+        Normalise y-axis jointly across both models (0 % = worst, 100 % = best).
+    """
+    from matplotlib.patches import Patch
+
+    gin_ds  = set(df_gin[COL_DATASET].dropna().unique())
+    gpse_ds = set(df_gpse[COL_DATASET].dropna().unique())
+    common  = sorted(gin_ds & gpse_ds)
+    if datasets:
+        common = [d for d in common if d in datasets]
+    if not common:
+        print("  [combined bars] no common datasets – skipping")
+        return None
+
+    _scopes = ["probe", "full"] if scope is None else [scope]
+    # Sub-bar ordering: (gin,probe), (gin,full), (gpse,probe), (gpse,full) when scope=None;
+    # (gin,scope), (gpse,scope) when scope is set.
+    sub_keys: list[tuple[str, str]] = []
+    for mk in ("gin", "gpse_backbone"):
+        for s in _scopes:
+            sub_keys.append((mk, s))
+    n_sub = len(sub_keys)
+
+    bar_w, group_w, sub_offsets = _bar_layout(n_sub)
+
+    N      = len(common)
+    n_cols = min(N, _BAR_DS_PER_ROW)
+    n_rows = math.ceil(N / n_cols)
+
+    all_methods_union: list[str] = sorted(
+        set(df_gin[COL_PRETRAIN].dropna().unique()) |
+        set(df_gpse[COL_PRETRAIN].dropna().unique())
+    )
+    cell_w = max(4.5, 1.6 * (len(all_methods_union) + 1))
+    cell_h = 3.8
+    fig_w  = max(cell_w * n_cols, 6.0)
+    fig_h  = cell_h * n_rows + 1.6
+
+    with mpl.rc_context(RC_PARAMS):
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(fig_w, fig_h),
+            squeeze=False,
+            sharey=False,
+        )
+
+        for di, dataset in enumerate(common):
+            ri, ci = divmod(di, n_cols)
+            ax = axes[ri][ci]
+
+            sub_gin  = df_gin[df_gin[COL_DATASET] == dataset].copy()
+            sub_gpse = df_gpse[df_gpse[COL_DATASET] == dataset].copy()
+
+            # Monitor info (prefer gin)
+            monitor_test_col: str | None = None
+            monitor_metric: str = "metric"
+            monitor_mode: str   = "max"
+            for sub_m in (sub_gin, sub_gpse):
+                if monitor_test_col is None and COL_MON_COL in sub_m.columns:
+                    v = sub_m[COL_MON_COL].dropna()
+                    if not v.empty:
+                        monitor_test_col = str(v.iloc[0])
+                if COL_MON_METRIC in sub_m.columns:
+                    v = sub_m[COL_MON_METRIC].dropna()
+                    if not v.empty:
+                        monitor_metric = str(v.iloc[0])
+                if COL_MON_MODE in sub_m.columns:
+                    v = sub_m[COL_MON_MODE].dropna()
+                    if not v.empty:
+                        monitor_mode = str(v.iloc[0])
+
+            if monitor_test_col is None:
+                ax.set_visible(False)
+                continue
+
+            mc = _mean_col(monitor_test_col)
+            sc = mc.replace("_mean", "_std")
+
+            # Percentage normalisation (joint across both models)
+            best_val: float | None = None
+            worst_val: float | None = None
+            if pct:
+                norm = _dataset_norm_params_combined(df_gin, df_gpse, dataset)
+                if norm is None:
+                    ax.set_visible(False)
+                    continue
+                best_val, worst_val, _, _ = norm
+
+            def _to_y(v: float) -> float:
+                return _to_pct(v, best_val, worst_val) if pct else v  # type: ignore[arg-type]
+
+            def _to_ye(se: float) -> float:
+                return _to_pct_stderr(se, best_val, worst_val) if pct else se  # type: ignore[arg-type]
+
+            # Union of methods at this fraction in either model
+            ft_methods_set: set[str] = set()
+            for df_m in (df_gin, df_gpse):
+                sub_m = df_m[df_m[COL_DATASET] == dataset]
+                frac_sub = sub_m[sub_m[COL_FRACTION] == fraction]
+                ft_methods_set.update(
+                    frac_sub[
+                        frac_sub[COL_FT_MODE].str.startswith("finetune")
+                    ][COL_PRETRAIN].dropna().unique()
+                )
+            ft_methods = sorted(ft_methods_set)
+            if not ft_methods:
+                ax.set_visible(False)
+                continue
+
+            n_groups  = len(ft_methods) + 1
+            x_centers = np.arange(n_groups, dtype=float) * group_w
+            all_y: list[float] = []
+
+            # ── Pretrain-method bars ──────────────────────────────────────────
+            for gi, method in enumerate(ft_methods):
+                color = PRETRAIN_BAR_COLORS.get(method, f"C{gi}")
+                x_c   = x_centers[gi]
+
+                for sbi, (model_key, s) in enumerate(sub_keys):
+                    df_m  = df_gin if model_key == "gin" else df_gpse
+                    sub_m = df_m[df_m[COL_DATASET] == dataset]
+                    rows  = sub_m[
+                        (sub_m[COL_PRETRAIN] == method) &
+                        (sub_m[COL_FRACTION] == fraction) &
+                        (sub_m[COL_FT_MODE] == f"finetune-{s}")
+                    ]
+                    if rows.empty or mc not in rows.columns:
+                        continue
+                    y_raw = float(rows[mc].iloc[0])
+                    if np.isnan(y_raw):
+                        continue
+                    n_s  = int(rows[COL_SEED_COUNT].iloc[0]) if COL_SEED_COUNT in rows.columns else 3
+                    se_r = (float(rows[sc].iloc[0]) / np.sqrt(max(n_s, 1))
+                            if sc in rows.columns else 0.0)
+                    y_v  = _to_y(y_raw)
+                    ye_v = _to_ye(se_r)
+                    alpha = 0.55 if model_key == "gin" else 1.0
+                    hatch = "////" if s == "full" else None
+                    x_pos = x_c + sub_offsets[sbi]
+                    ax.bar(x_pos, y_v, bar_w * 0.92,
+                           color=color, alpha=alpha,
+                           hatch=hatch,
+                           edgecolor="0.95" if hatch is None else "0.4",
+                           linewidth=0.4, zorder=2)
+                    ax.errorbar(x_pos, y_v, yerr=ye_v,
+                                fmt="none", color="0.15",
+                                capsize=2, capthick=0.7, elinewidth=0.7, zorder=3)
+                    all_y += [y_v + ye_v, y_v - ye_v]
+
+            # ── From Scratch bars (gray, per model) ───────────────────────────
+            x_c = x_centers[-1]
+            for sbi, (model_key, s) in enumerate(sub_keys):
+                df_m  = df_gin if model_key == "gin" else df_gpse
+                sub_m = df_m[df_m[COL_DATASET] == dataset]
+                fs_d  = _get_from_scratch_bar(sub_m, mc, sc, fraction, s)
+                mv, se_r = fs_d.get(s, (None, None))
+                if mv is None:
+                    continue
+                y_v  = _to_y(mv)
+                ye_v = _to_ye(se_r)
+                alpha = 0.55 if model_key == "gin" else 1.0
+                hatch = "////" if s == "full" else None
+                x_pos = x_c + sub_offsets[sbi]
+                ax.bar(x_pos, y_v, bar_w * 0.92,
+                       color=FROM_SCRATCH_COLOR, alpha=alpha,
+                       hatch=hatch,
+                       edgecolor="0.95" if hatch is None else "0.5",
+                       linewidth=0.4, zorder=2)
+                ax.errorbar(x_pos, y_v, yerr=ye_v,
+                            fmt="none", color="0.15",
+                            capsize=2, capthick=0.7, elinewidth=0.7, zorder=3)
+                all_y += [y_v + ye_v, y_v - ye_v]
+
+            # Axis formatting
+            ax.set_xticks(x_centers)
+            ax.set_xticklabels(
+                [_pretrain_label(m) for m in ft_methods] + ["From\nScratch"],
+                rotation=35, ha="right", fontsize=7,
+            )
+            ax.set_title(dataset, fontsize=9, fontweight="bold")
+
+            if pct:
+                ax.set_ylabel("Performance (%)", fontsize=8)
+            else:
+                ax.set_ylabel(_metric_ylabel(str(monitor_metric), str(monitor_mode)), fontsize=8)
+
+            if all_y:
+                lo, hi = min(all_y), max(all_y)
+                pad = (hi - lo) * 0.12 if hi > lo else abs(hi) * 0.06 + 0.01
+                lo_lim = lo - pad
+                hi_lim = hi + pad * 2
+                if pct:
+                    lo_lim = max(0.0, lo_lim)
+                    hi_lim = min(100.0, hi_lim)
+                ax.set_ylim(lo_lim, hi_lim)
+            ax.tick_params(labelsize=7)
+            ax.set_xlim(-group_w * 0.5, x_centers[-1] + group_w * 0.6)
+
+        # ── Hide unused panels ────────────────────────────────────────────────
+        for ei in range(N, n_rows * n_cols):
+            ri, ci = divmod(ei, n_cols)
+            axes[ri][ci].set_visible(False)
+
+        # ── Legend ────────────────────────────────────────────────────────────
+        method_handles = [
+            Patch(facecolor=PRETRAIN_BAR_COLORS.get(m, f"C{i}"), alpha=0.85,
+                  label=_pretrain_label(m))
+            for i, m in enumerate(all_methods_union)
+        ]
+        fs_handle    = Patch(facecolor=FROM_SCRATCH_COLOR, alpha=0.8, label="From Scratch")
+        model_handles = [
+            Patch(facecolor="0.55", alpha=0.55, label="GIN (lighter = lower alpha)"),
+            Patch(facecolor="0.35", alpha=1.00, label="GPSE (solid)"),
+        ]
+        scope_handles: list = []
+        if scope is None:
+            scope_handles = [
+                Patch(facecolor="0.6", hatch=None,   edgecolor="0.4", lw=0.5, label="Probe head"),
+                Patch(facecolor="0.6", hatch="////", edgecolor="0.5", lw=0.5, label="Full fine-tune"),
+            ]
+        all_handles = method_handles + [fs_handle] + model_handles + scope_handles
+        if all_handles:
+            fig.legend(handles=all_handles, loc="lower center",
+                       ncol=min(len(all_handles), 5),
+                       fontsize=8, frameon=True, bbox_to_anchor=(0.5, 0.0))
+            fig.tight_layout(rect=(0, 0.10, 1, 0.97))
+        else:
+            fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+        scope_str = (" (probe head)" if scope == "probe"
+                     else " (full fine-tune)" if scope == "full" else "")
+        pct_str   = " [%]" if pct else ""
+        fig.suptitle(
+            f"Performance{pct_str} at fraction = {fraction:g}"
+            f" — GIN & GPSE (common datasets){scope_str}",
+            fontsize=12, fontweight="bold", y=0.995,
+        )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stem_scope = "" if scope is None else f"_{scope}"
+        stem_pct   = "_pct" if pct else ""
+        stem       = f"all_datasets{stem_pct}{stem_scope}_gin_and_gpse"
+        out_path   = output_dir / f"{stem}.{fmt}"
+        fig.savefig(out_path, bbox_inches="tight", dpi=200 if fmt == "png" else None)
+        plt.close(fig)
+        print(f"  saved → {out_path}")
+        return out_path
+
+
+def _generate_frac_bars(
+    df: pd.DataFrame,
+    output_dir: Path,
+    fmt: str = "png",
+    datasets: list[str] | None = None,
+) -> None:
+    """Generate bar-chart figures for every fraction present in *df*.
+
+    Saves into sub-directories: ``<output_dir>/all_datasets_bars_frac_{frac:g}/``
+    Each sub-directory gets six files:
+      all_datasets.png, all_datasets_probe.png, all_datasets_full.png
+      all_datasets_pct.png, all_datasets_pct_probe.png, all_datasets_pct_full.png
+    """
+    fractions = sorted(df[COL_FRACTION].dropna().unique())
+    for frac in fractions:
+        frac_dir = output_dir / f"all_datasets_bars_frac_{frac:g}"
+        print(f"  fraction = {frac:g}  →  {frac_dir}")
+        for scope in (None, "probe", "full"):
+            for use_pct in (False, True):
+                lbl = ("combined" if scope is None else scope) + (" pct" if use_pct else "")
+                try:
+                    plot_all_datasets_bars_frac(
+                        df, frac_dir, fmt=fmt, datasets=datasets,
+                        fraction=frac, scope=scope, pct=use_pct,
+                    )
+                except Exception as exc:
+                    print(f"  ERROR bars frac={frac:g} ({lbl}): {exc}")
+
+
+def _generate_frac_bars_combined(
+    df_gin: pd.DataFrame,
+    df_gpse: pd.DataFrame,
+    output_dir: Path,
+    fmt: str = "png",
+    datasets: list[str] | None = None,
+) -> None:
+    """Same as ``_generate_frac_bars`` but for the combined GIN + GPSE plots."""
+    fractions = sorted(
+        set(df_gin[COL_FRACTION].dropna().tolist()) |
+        set(df_gpse[COL_FRACTION].dropna().tolist())
+    )
+    for frac in fractions:
+        frac_dir = output_dir / f"all_datasets_bars_frac_{frac:g}"
+        print(f"  [combined] fraction = {frac:g}  →  {frac_dir}")
+        for scope in (None, "probe", "full"):
+            for use_pct in (False, True):
+                lbl = ("combined" if scope is None else scope) + (" pct" if use_pct else "")
+                try:
+                    plot_all_datasets_bars_frac_combined(
+                        df_gin, df_gpse, frac_dir, fmt=fmt, datasets=datasets,
+                        fraction=frac, scope=scope, pct=use_pct,
+                    )
+                except Exception as exc:
+                    print(f"  ERROR combined bars frac={frac:g} ({lbl}): {exc}")
+
+
+# ── Combined GIN + GPSE learning-curve grids ─────────────────────────────────
+
+def _dataset_norm_params_combined(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    dataset: str,
+) -> tuple[float, float, str, str] | None:
+    """Compute (best_val, worst_val, mean_col, monitor_mode) for one dataset
+    across two DataFrames (e.g. gin and gpse_backbone).
+
+    best_val / worst_val span the union of all metric values observed in both
+    models, so 100 % and 0 % are calibrated jointly across models.
+    """
+    def _resolve(df: pd.DataFrame):
+        sub = df[df[COL_DATASET] == dataset]
+        if sub.empty:
+            return None, None, None
+        mode = (sub[COL_MON_MODE].dropna().iloc[0]
+                if COL_MON_MODE in sub.columns and not sub[COL_MON_MODE].dropna().empty
+                else "max")
+        col  = (sub[COL_MON_COL].dropna().iloc[0]
+                if COL_MON_COL in sub.columns and not sub[COL_MON_COL].dropna().empty
+                else None)
+        return mode, col, sub
+
+    mode_a, col_a, sub_a = _resolve(df_a)
+    mode_b, col_b, sub_b = _resolve(df_b)
+
+    monitor_mode     = mode_a or mode_b or "max"
+    monitor_test_col = col_a or col_b
+    if monitor_test_col is None:
+        return None
+
+    mc = _mean_col(monitor_test_col)
+    all_vals: list[float] = []
+    for sub in (sub_a, sub_b):
+        if sub is not None and mc in sub.columns:
+            all_vals.extend(float(v) for v in sub[mc].dropna())
+    if not all_vals:
+        return None
+
+    s = pd.Series(all_vals, dtype=float)
+    if str(monitor_mode).lower() == "min":
+        best_val, worst_val = float(s.min()), float(s.max())
+    else:
+        best_val, worst_val = float(s.max()), float(s.min())
+    return best_val, worst_val, mc, str(monitor_mode)
+
+
+def plot_all_datasets_combined(
+    df_gin: pd.DataFrame,
+    df_gpse: pd.DataFrame,
+    output_dir: Path,
+    fmt: str = "png",
+    datasets: list[str] | None = None,
+    scope: str | None = None,
+) -> Path | None:
+    """Master grid showing GIN and GPSE backbone results in the same cells.
+
+    Only datasets present in *both* DataFrames are included.
+    GIN uses lighter colours; GPSE uses darker colours.
+    Columns = union of all pretraining methods; rows = common datasets.
+    Y-axis is shared within each row (so both models share the same scale).
+
+    Parameters
+    ----------
+    scope : ``None`` | ``"probe"`` | ``"full"``
+        When set, only probe-head or full fine-tune modes are shown.
+    """
+    from matplotlib.lines import Line2D
+
+    gin_ds  = set(df_gin[COL_DATASET].dropna().unique())
+    gpse_ds = set(df_gpse[COL_DATASET].dropna().unique())
+    common  = sorted(gin_ds & gpse_ds)
+    if datasets:
+        common = [d for d in common if d in datasets]
+    if not common:
+        print("  [combined] no common datasets found – skipping combined plot")
+        return None
+
+    all_methods: list[str] = sorted(
+        set(df_gin[COL_PRETRAIN].dropna().unique()) |
+        set(df_gpse[COL_PRETRAIN].dropna().unique())
+    )
+    n_cols = len(all_methods)
+    n_rows = len(common)
+
+    cell_w = 3.2
+    cell_h = 2.8
+    fig_w  = max(cell_w * n_cols + 0.8, 8.0)
+    fig_h  = cell_h * n_rows + 1.4
+
+    with mpl.rc_context(RC_PARAMS):
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(fig_w, fig_h),
+            sharey="row",
+            sharex=True,
+            squeeze=False,
+        )
+
+        for ci, method in enumerate(all_methods):
+            axes[0][ci].set_title(
+                _pretrain_label(method), fontweight="bold", fontsize=8, pad=4
+            )
+
+        modes_union: set[str] = set()
+
+        for ri, dataset in enumerate(common):
+            sub_gin  = df_gin[df_gin[COL_DATASET] == dataset].copy()
+            sub_gpse = df_gpse[df_gpse[COL_DATASET] == dataset].copy()
+
+            # Resolve monitor info – prefer gin, fall back to gpse
+            monitor_test_col: str | None = None
+            monitor_metric: str = "metric"
+            monitor_mode: str = "max"
+            for sub in (sub_gin, sub_gpse):
+                if monitor_test_col is None and COL_MON_COL in sub.columns:
+                    v = sub[COL_MON_COL].dropna()
+                    if not v.empty:
+                        monitor_test_col = str(v.iloc[0])
+                if COL_MON_METRIC in sub.columns:
+                    v = sub[COL_MON_METRIC].dropna()
+                    if not v.empty:
+                        monitor_metric = str(v.iloc[0])
+                if COL_MON_MODE in sub.columns:
+                    v = sub[COL_MON_MODE].dropna()
+                    if not v.empty:
+                        monitor_mode = str(v.iloc[0])
+
+            if monitor_test_col is None:
+                for ci in range(n_cols):
+                    axes[ri][ci].set_visible(False)
+                continue
+
+            mc = _mean_col(monitor_test_col)
+            sc = mc.replace("_mean", "_std")
+
+            # Y-limits: span of both models' data for this dataset
+            subs_with_mc = [s for s in (sub_gin, sub_gpse) if mc in s.columns]
+            if not subs_with_mc:
+                for ci in range(n_cols):
+                    axes[ri][ci].set_visible(False)
+                continue
+            all_sub = pd.concat(subs_with_mc, ignore_index=True)
+            y_lo, y_hi = _y_limits(all_sub, mc, sc)
+
+            # Modes present in either model
+            modes_either = (
+                set(sub_gin[COL_FT_MODE].unique()) |
+                set(sub_gpse[COL_FT_MODE].unique())
+            )
+            modes_present = [m for m in MODE_ORDER if m in modes_either]
+            modes_present += [m for m in modes_either if m not in MODE_ORDER]
+            modes_present = _filter_modes_by_scope(modes_present, scope)
+            modes_union.update(modes_present)
+
+            ylabel_txt = _metric_ylabel(str(monitor_metric), str(monitor_mode))
+            axes[ri][0].set_ylabel(ylabel_txt, fontsize=7)
+            axes[ri][0].annotate(
+                dataset,
+                xy=(-0.55, 0.5), xycoords="axes fraction",
+                fontsize=7, fontweight="bold",
+                ha="right", va="center",
+                rotation=0,
+                annotation_clip=False,
+            )
+
+            for ci, method in enumerate(all_methods):
+                ax = axes[ri][ci]
+                gin_task  = sub_gin[sub_gin[COL_PRETRAIN] == method]
+                gpse_task = sub_gpse[sub_gpse[COL_PRETRAIN] == method]
+
+                if gin_task.empty and gpse_task.empty:
+                    ax.set_visible(False)
+                    continue
+
+                fractions_all: list[float] = sorted(
+                    set(gin_task[COL_FRACTION].dropna().tolist()) |
+                    set(gpse_task[COL_FRACTION].dropna().tolist())
+                )
+
+                for model_key, task_df in (("gin", gin_task), ("gpse_backbone", gpse_task)):
+                    if task_df.empty or mc not in task_df.columns:
+                        continue
+                    for mode in modes_present:
+                        mode_df = task_df[task_df[COL_FT_MODE] == mode].sort_values(COL_FRACTION)
+                        if mode_df.empty:
+                            continue
+                        x    = mode_df[COL_FRACTION].values
+                        y    = mode_df[mc].values
+                        yerr = _compute_stderr(mode_df, sc).values
+                        ax.errorbar(
+                            x, y, yerr=yerr,
+                            color=_combined_mode_color(mode, model_key),
+                            marker=_mode_marker(mode),
+                            linestyle=_mode_linestyle(mode),
+                            linewidth=RC_PARAMS["lines.linewidth"],
+                            markersize=RC_PARAMS["lines.markersize"] * 0.8,
+                            capsize=2, capthick=0.9, elinewidth=0.9,
+                            zorder=3,
+                        )
+
+                ax.set_ylim(y_lo, y_hi)
+                if fractions_all:
+                    ax.set_xticks(fractions_all)
+                    ax.xaxis.set_major_formatter(
+                        matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}")
+                    )
+                ax.set_xlim(-0.02, max(fractions_all) + 0.05 if fractions_all else 1.1)
+                ax.tick_params(labelsize=7)
+                if ri == n_rows - 1:
+                    ax.set_xlabel("Data fraction", fontsize=7)
+
+        # ── Legend ────────────────────────────────────────────────────────────
+        all_modes = [m for m in MODE_ORDER if m in modes_union]
+        all_modes += [m for m in modes_union if m not in MODE_ORDER]
+
+        groups_present = []
+        for gkey, gstart in [("pretrained", "finetune"), ("from_scratch", "random-init")]:
+            if any(m.startswith(gstart) for m in all_modes):
+                groups_present.append(gkey)
+
+        model_color_handles = []
+        for model_key in ("gin", "gpse_backbone"):
+            for gkey in groups_present:
+                color  = _MODEL_GROUP_COLORS[model_key][gkey]
+                marker = GROUP_MARKERS[gkey]
+                label  = f"{MODEL_DISPLAY[model_key]} – {GROUP_LABELS[gkey]}"
+                model_color_handles.append(
+                    Line2D(
+                        [0], [0], color=color, marker=marker,
+                        linestyle="-", linewidth=RC_PARAMS["lines.linewidth"],
+                        markersize=RC_PARAMS["lines.markersize"], label=label,
+                    )
+                )
+
+        scopes_present = []
+        if scope is None:
+            for skey in ("probe", "full"):
+                if any(skey in m for m in all_modes):
+                    scopes_present.append(skey)
+
+        style_handles = [
+            Line2D([0], [0], color="0.35", linestyle=TUNE_LINESTYLES[s],
+                   linewidth=RC_PARAMS["lines.linewidth"], label=TUNE_LABELS[s])
+            for s in scopes_present
+        ]
+
+        all_handles = model_color_handles + style_handles
+        if all_handles:
+            fig.legend(
+                handles=all_handles, loc="lower center",
+                ncol=min(len(all_handles), 4), frameon=True,
+                fontsize=RC_PARAMS["legend.fontsize"],
+                bbox_to_anchor=(0.5, 0.0),
+            )
+            fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+        else:
+            fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+        title = "Learning curves — GIN & GPSE (common datasets)"
+        if scope == "probe":
+            title += " (probe head)"
+        elif scope == "full":
+            title += " (full fine-tune)"
+        fig.suptitle(title, fontsize=12, fontweight="bold", y=0.995)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stem = (
+            "all_datasets_gin_and_gpse" if scope is None
+            else f"all_datasets_{scope}_gin_and_gpse"
+        )
+        out_path = output_dir / f"{stem}.{fmt}"
+        fig.savefig(out_path, bbox_inches="tight", dpi=200 if fmt == "png" else None)
+        plt.close(fig)
+        print(f"  saved → {out_path}")
+        return out_path
+
+
+def plot_all_datasets_percentage_combined(
+    df_gin: pd.DataFrame,
+    df_gpse: pd.DataFrame,
+    output_dir: Path,
+    fmt: str = "png",
+    datasets: list[str] | None = None,
+    scope: str | None = None,
+) -> Path | None:
+    """Same layout as plot_all_datasets_combined but y-axis is [0, 100 %].
+
+    100 % = best mean result observed across *both* models for each dataset.
+    0   % = worst mean result observed across *both* models.
+
+    Calibrating the scale jointly means the two models are directly comparable
+    on the same percentage axis per dataset.
+
+    Parameters
+    ----------
+    scope : ``None`` | ``"probe"`` | ``"full"``
+        When set, only probe-head or full fine-tune modes are shown.
+    """
+    from matplotlib.lines import Line2D
+
+    gin_ds  = set(df_gin[COL_DATASET].dropna().unique())
+    gpse_ds = set(df_gpse[COL_DATASET].dropna().unique())
+    common  = sorted(gin_ds & gpse_ds)
+    if datasets:
+        common = [d for d in common if d in datasets]
+    if not common:
+        print("  [combined pct] no common datasets found – skipping")
+        return None
+
+    all_methods: list[str] = sorted(
+        set(df_gin[COL_PRETRAIN].dropna().unique()) |
+        set(df_gpse[COL_PRETRAIN].dropna().unique())
+    )
+    n_cols = len(all_methods)
+    n_rows = len(common)
+
+    cell_w = 3.2
+    cell_h = 2.8
+    fig_w  = max(cell_w * n_cols + 0.8, 8.0)
+    fig_h  = cell_h * n_rows + 1.4
+
+    with mpl.rc_context(RC_PARAMS):
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(fig_w, fig_h),
+            sharey="row",
+            sharex=True,
+            squeeze=False,
+        )
+
+        for ci, method in enumerate(all_methods):
+            axes[0][ci].set_title(
+                _pretrain_label(method), fontweight="bold", fontsize=8, pad=4
+            )
+
+        modes_union: set[str] = set()
+
+        for ri, dataset in enumerate(common):
+            sub_gin  = df_gin[df_gin[COL_DATASET] == dataset].copy()
+            sub_gpse = df_gpse[df_gpse[COL_DATASET] == dataset].copy()
+
+            # Combined normalisation (best/worst across BOTH models)
+            norm = _dataset_norm_params_combined(df_gin, df_gpse, dataset)
+            if norm is None:
+                for ci in range(n_cols):
+                    axes[ri][ci].set_visible(False)
+                continue
+            best_val, worst_val, mc, monitor_mode = norm
+            sc = mc.replace("_mean", "_std")
+
+            monitor_metric = "metric"
+            for sub in (sub_gin, sub_gpse):
+                if COL_MON_METRIC in sub.columns:
+                    v = sub[COL_MON_METRIC].dropna()
+                    if not v.empty:
+                        monitor_metric = str(v.iloc[0])
+                        break
+
+            modes_either = (
+                set(sub_gin[COL_FT_MODE].unique()) |
+                set(sub_gpse[COL_FT_MODE].unique())
+            )
+            modes_present = [m for m in MODE_ORDER if m in modes_either]
+            modes_present += [m for m in modes_either if m not in MODE_ORDER]
+            modes_present = _filter_modes_by_scope(modes_present, scope)
+            modes_union.update(modes_present)
+
+            # Per-row % y-limits from both models
+            pct_vals, pct_errs = [], []
+            for sub in (sub_gin, sub_gpse):
+                if mc not in sub.columns:
+                    continue
+                for _, row in sub.iterrows():
+                    v = row.get(mc)
+                    if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                        pct_vals.append(_to_pct(float(v), best_val, worst_val))
+                    if sc in sub.columns:
+                        s = row.get(sc)
+                        n_s = row.get(COL_SEED_COUNT, 3) or 3
+                        if s is not None and not (isinstance(s, float) and np.isnan(s)):
+                            pct_errs.append(
+                                _to_pct_stderr(float(s) / np.sqrt(n_s), best_val, worst_val)
+                            )
+            pad  = 5.0
+            lo   = (min(pct_vals) - (max(pct_errs) if pct_errs else 0)) if pct_vals else 0.0
+            hi   = (max(pct_vals) + (max(pct_errs) if pct_errs else 0)) if pct_vals else 100.0
+            y_lo = max(0.0,   lo - pad)
+            y_hi = min(100.0, hi + pad)
+
+            axes[ri][0].set_ylabel("Performance (%)", fontsize=7)
+            axes[ri][0].annotate(
+                dataset,
+                xy=(-0.55, 0.5), xycoords="axes fraction",
+                fontsize=7, fontweight="bold",
+                ha="right", va="center",
+                rotation=0,
+                annotation_clip=False,
+            )
+
+            for ci, method in enumerate(all_methods):
+                ax = axes[ri][ci]
+                gin_task  = sub_gin[sub_gin[COL_PRETRAIN] == method]
+                gpse_task = sub_gpse[sub_gpse[COL_PRETRAIN] == method]
+
+                if gin_task.empty and gpse_task.empty:
+                    ax.set_visible(False)
+                    continue
+
+                fractions_all: list[float] = sorted(
+                    set(gin_task[COL_FRACTION].dropna().tolist()) |
+                    set(gpse_task[COL_FRACTION].dropna().tolist())
+                )
+
+                for model_key, task_df in (("gin", gin_task), ("gpse_backbone", gpse_task)):
+                    if task_df.empty or mc not in task_df.columns:
+                        continue
+                    for mode in modes_present:
+                        mode_df = task_df[task_df[COL_FT_MODE] == mode].sort_values(COL_FRACTION)
+                        if mode_df.empty:
+                            continue
+                        x    = mode_df[COL_FRACTION].values
+                        y    = np.array([_to_pct(float(v), best_val, worst_val)
+                                         for v in mode_df[mc].values])
+                        if sc in mode_df.columns:
+                            n_s  = (mode_df[COL_SEED_COUNT].values
+                                    if COL_SEED_COUNT in mode_df.columns
+                                    else np.full(len(x), 3))
+                            yerr = np.array([
+                                _to_pct_stderr(float(s) / np.sqrt(max(n, 1)), best_val, worst_val)
+                                for s, n in zip(mode_df[sc].values, n_s)
+                            ])
+                        else:
+                            yerr = np.zeros(len(x))
+                        ax.errorbar(
+                            x, y, yerr=yerr,
+                            color=_combined_mode_color(mode, model_key),
+                            marker=_mode_marker(mode),
+                            linestyle=_mode_linestyle(mode),
+                            linewidth=RC_PARAMS["lines.linewidth"],
+                            markersize=RC_PARAMS["lines.markersize"] * 0.8,
+                            capsize=2, capthick=0.9, elinewidth=0.9,
+                            zorder=3,
+                        )
+
+                ax.set_ylim(y_lo, y_hi)
+                if fractions_all:
+                    ax.set_xticks(fractions_all)
+                    ax.xaxis.set_major_formatter(
+                        matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}")
+                    )
+                ax.set_xlim(-0.02, max(fractions_all) + 0.05 if fractions_all else 1.1)
+                ax.tick_params(labelsize=7)
+                if ri == n_rows - 1:
+                    ax.set_xlabel("Data fraction", fontsize=7)
+
+        # ── Legend ────────────────────────────────────────────────────────────
+        all_modes = [m for m in MODE_ORDER if m in modes_union]
+        all_modes += [m for m in modes_union if m not in MODE_ORDER]
+
+        groups_present = []
+        for gkey, gstart in [("pretrained", "finetune"), ("from_scratch", "random-init")]:
+            if any(m.startswith(gstart) for m in all_modes):
+                groups_present.append(gkey)
+
+        model_color_handles = []
+        for model_key in ("gin", "gpse_backbone"):
+            for gkey in groups_present:
+                color  = _MODEL_GROUP_COLORS[model_key][gkey]
+                marker = GROUP_MARKERS[gkey]
+                label  = f"{MODEL_DISPLAY[model_key]} – {GROUP_LABELS[gkey]}"
+                model_color_handles.append(
+                    Line2D(
+                        [0], [0], color=color, marker=marker,
+                        linestyle="-", linewidth=RC_PARAMS["lines.linewidth"],
+                        markersize=RC_PARAMS["lines.markersize"], label=label,
+                    )
+                )
+
+        scopes_present = []
+        if scope is None:
+            for skey in ("probe", "full"):
+                if any(skey in m for m in all_modes):
+                    scopes_present.append(skey)
+
+        style_handles = [
+            Line2D([0], [0], color="0.35", linestyle=TUNE_LINESTYLES[s],
+                   linewidth=RC_PARAMS["lines.linewidth"], label=TUNE_LABELS[s])
+            for s in scopes_present
+        ]
+
+        all_handles = model_color_handles + style_handles
+        if all_handles:
+            fig.legend(
+                handles=all_handles, loc="lower center",
+                ncol=min(len(all_handles), 4), frameon=True,
+                fontsize=RC_PARAMS["legend.fontsize"],
+                bbox_to_anchor=(0.5, 0.0),
+            )
+            fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+        else:
+            fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+        title = (
+            "Learning curves (%) — GIN & GPSE (common datasets)"
+            "  ·  100 % = best across both models, 0 % = worst"
+        )
+        if scope == "probe":
+            title += " (probe head)"
+        elif scope == "full":
+            title += " (full fine-tune)"
+        fig.suptitle(title, fontsize=11, fontweight="bold", y=0.995)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stem = (
+            "all_datasets_pct_gin_and_gpse" if scope is None
+            else f"all_datasets_pct_{scope}_gin_and_gpse"
+        )
+        out_path = output_dir / f"{stem}.{fmt}"
+        fig.savefig(out_path, bbox_inches="tight", dpi=200 if fmt == "png" else None)
+        plt.close(fig)
+        print(f"  saved → {out_path}")
+        return out_path
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Plot aggregated finetuning results.")
     p.add_argument(
-        "--input", type=Path, default=DEFAULT_INPUT,
-        help="Path to aggregated_results.csv",
+        "--model", default="gin", choices=list(MODELS),
+        help="Model backbone whose results to plot. Determines default input CSV and "
+             "output directory (outputs/{model}/). Default: gin.",
     )
     p.add_argument(
-        "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
-        help="Directory to write figures into.",
+        "--input", type=Path, default=None,
+        help="Path to aggregated_results.csv (default: outputs/{model}/aggregated_results.csv).",
+    )
+    p.add_argument(
+        "--output-dir", type=Path, default=None,
+        help="Directory to write figures into (default: outputs/{model}/figures/).",
     )
     p.add_argument(
         "--fmt", default="png", choices=["png", "pdf", "svg"],
@@ -1572,6 +2928,14 @@ def parse_args() -> argparse.Namespace:
         help="Skip property-correlation scatter figures.",
     )
     p.add_argument(
+        "--no-shift-correlations", action="store_true",
+        help="Skip train-val and val-test split-shift correlation scatter figures.",
+    )
+    p.add_argument(
+        "--no-frac-avg-correlations", action="store_true",
+        help="Skip the fraction-averaged correlation scatter figures.",
+    )
+    p.add_argument(
         "--no-barplots", action="store_true",
         help="Skip per-(fraction, scope) grouped improvement bar charts.",
     )
@@ -1583,17 +2947,79 @@ def parse_args() -> argparse.Namespace:
         "--metadata-dir", type=Path, default=METADATA_DIR_DEFAULT,
         help="Directory containing per-dataset metadata JSON files.",
     )
+    p.add_argument(
+        "--combined-only", action="store_true",
+        help=(
+            "Skip all per-model plots and only generate the combined GIN + GPSE "
+            "summarising figures (requires both outputs/gin/aggregated_results.csv "
+            "and outputs/gpse_backbone/aggregated_results.csv to exist)."
+        ),
+    )
+    p.add_argument(
+        "--no-bars-frac", action="store_true",
+        help="Skip per-fraction bar-chart figures (all_datasets_bars_frac_*/).",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    if not args.input.exists():
-        raise FileNotFoundError(f"Input file not found: {args.input}")
+    # ── --combined-only: skip single-model work entirely ─────────────────────
+    if args.combined_only:
+        _gin_csv  = _OUTPUTS_BASE / "gin"           / "aggregated_results.csv"
+        _gpse_csv = _OUTPUTS_BASE / "gpse_backbone" / "aggregated_results.csv"
+        _combined_dir = _OUTPUTS_BASE / "combined" / "figures"
+        print("Mode     : combined-only (GIN + GPSE)")
+        print(f"GIN CSV  : {_gin_csv}")
+        print(f"GPSE CSV : {_gpse_csv}")
+        print(f"Out dir  : {_combined_dir}")
+        for p in (_gin_csv, _gpse_csv):
+            if not p.exists():
+                raise FileNotFoundError(f"Required CSV not found: {p}")
+        _df_gin  = apply_shared_random_init_baseline(pd.read_csv(_gin_csv))
+        _df_gpse = apply_shared_random_init_baseline(pd.read_csv(_gpse_csv))
+        print(f"Loaded {len(_df_gin)} GIN rows, {len(_df_gpse)} GPSE rows")
+        print("\n── Combined GIN + GPSE summarising plots ──")
+        for _scope in (None, "probe", "full"):
+            _label = "combined" if _scope is None else _scope
+            try:
+                plot_all_datasets_combined(
+                    _df_gin, _df_gpse, _combined_dir,
+                    fmt=args.fmt, scope=_scope,
+                )
+            except Exception as exc:
+                print(f"  ERROR combined learning curves ({_label}): {exc}")
+            try:
+                plot_all_datasets_percentage_combined(
+                    _df_gin, _df_gpse, _combined_dir,
+                    fmt=args.fmt, scope=_scope,
+                )
+            except Exception as exc:
+                print(f"  ERROR combined pct ({_label}): {exc}")
+        if not args.no_bars_frac:
+            print("\n── Combined per-fraction bar charts ──")
+            try:
+                _generate_frac_bars_combined(_df_gin, _df_gpse, _combined_dir, fmt=args.fmt)
+            except Exception as exc:
+                print(f"  ERROR combined bars: {exc}")
+        print(f"\nDone. Figures in: {_combined_dir}")
+        return
 
-    df = pd.read_csv(args.input)
-    print(f"Loaded {len(df)} rows from {args.input}")
+    # Resolve model-specific paths (explicit args take precedence)
+    _model_dir = _OUTPUTS_BASE / args.model
+    input_path = args.input      or _model_dir / "aggregated_results.csv"
+    output_dir = args.output_dir or _model_dir / "figures"
+
+    print(f"Model    : {args.model}")
+    print(f"Input    : {input_path}")
+    print(f"Out dir  : {output_dir}")
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    df = pd.read_csv(input_path)
+    print(f"Loaded {len(df)} rows from {input_path}")
     df = apply_shared_random_init_baseline(df)
 
     if COL_DATASET not in df.columns:
@@ -1609,7 +3035,7 @@ def main() -> None:
         for dataset in datasets:
             print(f"[{dataset}]")
             try:
-                plot_dataset(df, dataset, args.output_dir, fmt=args.fmt)
+                plot_dataset(df, dataset, output_dir, fmt=args.fmt)
             except Exception as exc:
                 print(f"  ERROR: {exc}")
 
@@ -1619,7 +3045,7 @@ def main() -> None:
             label = "combined" if master_scope is None else master_scope
             try:
                 plot_all_datasets(
-                    df, args.output_dir, fmt=args.fmt,
+                    df, output_dir, fmt=args.fmt,
                     datasets=datasets, scope=master_scope,
                 )
             except Exception as exc:
@@ -1631,13 +3057,61 @@ def main() -> None:
             label = "combined" if master_scope is None else master_scope
             try:
                 plot_all_datasets_percentage(
-                    df, args.output_dir, fmt=args.fmt,
+                    df, output_dir, fmt=args.fmt,
                     datasets=datasets, scope=master_scope,
                 )
             except Exception as exc:
                 print(f"  ERROR ({label}): {exc}")
 
-    pct_dir = args.output_dir / "percentage_results"
+    # ── Combined GIN + GPSE master plots (generated alongside the per-model ones)
+    _gin_csv  = _OUTPUTS_BASE / "gin"           / "aggregated_results.csv"
+    _gpse_csv = _OUTPUTS_BASE / "gpse_backbone" / "aggregated_results.csv"
+    _df_gin:  pd.DataFrame | None = None
+    _df_gpse: pd.DataFrame | None = None
+    _combined_dir = _OUTPUTS_BASE / "combined" / "figures"
+    if _gin_csv.exists() and _gpse_csv.exists():
+        print("\n── Combined GIN + GPSE — master figures ──")
+        _df_gin  = apply_shared_random_init_baseline(pd.read_csv(_gin_csv))
+        _df_gpse = apply_shared_random_init_baseline(pd.read_csv(_gpse_csv))
+        if not args.no_master:
+            for _scope in (None, "probe", "full"):
+                _label = "combined" if _scope is None else _scope
+                try:
+                    plot_all_datasets_combined(
+                        _df_gin, _df_gpse, _combined_dir,
+                        fmt=args.fmt, scope=_scope,
+                    )
+                except Exception as exc:
+                    print(f"  ERROR combined learning curves ({_label}): {exc}")
+        if not args.no_pct_master:
+            for _scope in (None, "probe", "full"):
+                _label = "combined" if _scope is None else _scope
+                try:
+                    plot_all_datasets_percentage_combined(
+                        _df_gin, _df_gpse, _combined_dir,
+                        fmt=args.fmt, scope=_scope,
+                    )
+                except Exception as exc:
+                    print(f"  ERROR combined pct ({_label}): {exc}")
+        if not args.no_bars_frac:
+            print("\n── Combined per-fraction bar charts ──")
+            try:
+                _generate_frac_bars_combined(_df_gin, _df_gpse, _combined_dir, fmt=args.fmt)
+            except Exception as exc:
+                print(f"  ERROR combined bars: {exc}")
+    else:
+        _missing = [str(p) for p in (_gin_csv, _gpse_csv) if not p.exists()]
+        print(f"\n  Skipping combined GIN+GPSE plots (missing: {', '.join(_missing)})")
+
+    if not args.no_bars_frac:
+        n_fracs = len(df[COL_FRACTION].dropna().unique())
+        print(f"\n── Per-fraction bar charts ({n_fracs} fraction(s) × 6 figures each) ──")
+        try:
+            _generate_frac_bars(df, output_dir, fmt=args.fmt, datasets=datasets)
+        except Exception as exc:
+            print(f"  ERROR bars: {exc}")
+
+    pct_dir = output_dir / "percentage_results"
 
     if not args.no_percentage:
         print(f"\n── Percentage-normalised learning curves ({len(datasets)} dataset(s)) ──")
@@ -1649,26 +3123,157 @@ def main() -> None:
                 print(f"  ERROR: {exc}")
 
     # Load metadata once for all analyses that need it
+    need_metadata = not args.no_correlations or not args.no_shift_correlations
     metadata: dict = {}
-    if not args.no_correlations:
+    metadata_all_splits: dict = {}
+    if need_metadata:
         metadata = load_metadata(args.metadata_dir)
         if not metadata:
             print(f"\n  WARNING: no metadata JSON files found in {args.metadata_dir}")
 
+    corr_dir = pct_dir / "correlations"
+    n_groups = math.ceil(len(GRAPH_PROPERTIES) / PROPS_PER_PLOT)
+
     if not args.no_correlations and metadata:
-        corr_dir  = pct_dir / "correlations"
-        fractions = sorted(df[COL_FRACTION].dropna().unique())
-        n_groups  = math.ceil(len(GRAPH_PROPERTIES) / PROPS_PER_PLOT)
-        n_figs    = len(fractions) * 2 * n_groups
-        print(f"\n── Property-correlation plots ({n_figs} figure(s)) ──")
+        n_figs = 2 * n_groups   # 2 scopes, fractions pooled
+        print(f"\n── Property-correlation plots (fractions pooled, {n_figs} figure(s)) ──")
         try:
-            plot_property_correlations(df, metadata, corr_dir,
-                                       fmt=args.fmt, datasets=datasets)
+            plot_property_correlations(
+                df, metadata, corr_dir,
+                fmt=args.fmt, datasets=datasets,
+                pool_fractions=True,
+            )
         except Exception as exc:
             print(f"  ERROR: {exc}")
 
+        if not args.no_frac_avg_correlations:
+            frac_avg_dir = corr_dir / "frac-averaged"
+            print(f"\n── Property-correlation plots (fraction-averaged, {n_figs} figure(s)) ──")
+            try:
+                diff_df_corr = _build_diff_records(df, datasets)
+                frac_avg_df  = _build_frac_avg_diff_records(diff_df_corr)
+                plot_property_correlations(
+                    df, metadata, frac_avg_dir,
+                    fmt=args.fmt, datasets=datasets,
+                    pool_fractions=True,
+                    prebuilt_diff_df=frac_avg_df,
+                    title_extra="fraction-averaged",
+                    fname_prefix="corr_frac_avg",
+                )
+                for _method in sorted(frac_avg_df["pretrain_method"].unique()):
+                    _m_label = _pretrain_label(_method)
+                    _m_df = frac_avg_df[frac_avg_df["pretrain_method"] == _method]
+                    plot_property_correlations(
+                        df, metadata, frac_avg_dir / _method,
+                        fmt=args.fmt, datasets=datasets,
+                        pool_fractions=True,
+                        prebuilt_diff_df=_m_df,
+                        title_extra=f"fraction-averaged · {_m_label}",
+                        fname_prefix="corr_frac_avg",
+                    )
+            except Exception as exc:
+                print(f"  ERROR: {exc}")
+
+    if not args.no_shift_correlations:
+        metadata_all_splits = load_metadata_all_splits(args.metadata_dir)
+        if not metadata_all_splits:
+            print(f"\n  WARNING: no metadata JSON files found for shift correlations in {args.metadata_dir}")
+        else:
+            tv_meta, vt_meta = _compute_split_shift_metadata(metadata_all_splits)
+            n_figs = 2 * n_groups
+
+            if tv_meta:
+                tv_dir = corr_dir / "train-val-shift-correlations"
+                print(f"\n── Train-val shift correlation plots (fractions pooled, {n_figs} figure(s)) ──")
+                try:
+                    plot_property_correlations(
+                        df, tv_meta, tv_dir,
+                        fmt=args.fmt, datasets=datasets,
+                        pool_fractions=True,
+                        x_label_suffix=" |train−val|",
+                        title_extra="train−val property shift (mean, absolute)",
+                        fname_prefix="corr_tv_shift",
+                    )
+                except Exception as exc:
+                    print(f"  ERROR: {exc}")
+
+                if not args.no_frac_avg_correlations:
+                    tv_avg_dir = tv_dir / "frac-averaged"
+                    print(f"\n── Train-val shift correlation plots (fraction-averaged, {n_figs} figure(s)) ──")
+                    try:
+                        diff_df_tv  = _build_diff_records(df, datasets)
+                        frac_avg_tv = _build_frac_avg_diff_records(diff_df_tv)
+                        plot_property_correlations(
+                            df, tv_meta, tv_avg_dir,
+                            fmt=args.fmt, datasets=datasets,
+                            pool_fractions=True,
+                            prebuilt_diff_df=frac_avg_tv,
+                            x_label_suffix=" |train−val|",
+                            title_extra="train−val shift · fraction-averaged",
+                            fname_prefix="corr_tv_shift_frac_avg",
+                        )
+                        for _method in sorted(frac_avg_tv["pretrain_method"].unique()):
+                            _m_label = _pretrain_label(_method)
+                            _m_df = frac_avg_tv[frac_avg_tv["pretrain_method"] == _method]
+                            plot_property_correlations(
+                                df, tv_meta, tv_avg_dir / _method,
+                                fmt=args.fmt, datasets=datasets,
+                                pool_fractions=True,
+                                prebuilt_diff_df=_m_df,
+                                x_label_suffix=" |train−val|",
+                                title_extra=f"train−val shift · fraction-averaged · {_m_label}",
+                                fname_prefix="corr_tv_shift_frac_avg",
+                            )
+                    except Exception as exc:
+                        print(f"  ERROR: {exc}")
+
+            if vt_meta:
+                vt_dir = corr_dir / "val-test-shift-correlations"
+                print(f"\n── Val-test shift correlation plots (fractions pooled, {n_figs} figure(s)) ──")
+                try:
+                    plot_property_correlations(
+                        df, vt_meta, vt_dir,
+                        fmt=args.fmt, datasets=datasets,
+                        pool_fractions=True,
+                        x_label_suffix=" |val−test|",
+                        title_extra="val−test property shift (mean, absolute)",
+                        fname_prefix="corr_vt_shift",
+                    )
+                except Exception as exc:
+                    print(f"  ERROR: {exc}")
+
+                if not args.no_frac_avg_correlations:
+                    vt_avg_dir = vt_dir / "frac-averaged"
+                    print(f"\n── Val-test shift correlation plots (fraction-averaged, {n_figs} figure(s)) ──")
+                    try:
+                        diff_df_vt  = _build_diff_records(df, datasets)
+                        frac_avg_vt = _build_frac_avg_diff_records(diff_df_vt)
+                        plot_property_correlations(
+                            df, vt_meta, vt_avg_dir,
+                            fmt=args.fmt, datasets=datasets,
+                            pool_fractions=True,
+                            prebuilt_diff_df=frac_avg_vt,
+                            x_label_suffix=" |val−test|",
+                            title_extra="val−test shift · fraction-averaged",
+                            fname_prefix="corr_vt_shift_frac_avg",
+                        )
+                        for _method in sorted(frac_avg_vt["pretrain_method"].unique()):
+                            _m_label = _pretrain_label(_method)
+                            _m_df = frac_avg_vt[frac_avg_vt["pretrain_method"] == _method]
+                            plot_property_correlations(
+                                df, vt_meta, vt_avg_dir / _method,
+                                fmt=args.fmt, datasets=datasets,
+                                pool_fractions=True,
+                                prebuilt_diff_df=_m_df,
+                                x_label_suffix=" |val−test|",
+                                title_extra=f"val−test shift · fraction-averaged · {_m_label}",
+                                fname_prefix="corr_vt_shift_frac_avg",
+                            )
+                    except Exception as exc:
+                        print(f"  ERROR: {exc}")
+
     if not args.no_barplots:
-        bars_dir  = args.output_dir / "improvement_bars"
+        bars_dir  = output_dir / "improvement_bars"
         fractions = sorted(df[COL_FRACTION].dropna().unique())
         n_figs    = len(fractions) * 2
         print(f"\n── Improvement bar charts ({n_figs} figure(s)) ──")
@@ -1679,7 +3284,7 @@ def main() -> None:
             print(f"  ERROR: {exc}")
 
     if not args.no_avg_improvement:
-        avg_dir = args.output_dir / "improvement_bars"
+        avg_dir = output_dir / "improvement_bars"
         print("\n── Average-improvement summary figure ──")
         try:
             plot_average_improvement(df, avg_dir,
@@ -1687,7 +3292,7 @@ def main() -> None:
         except Exception as exc:
             print(f"  ERROR: {exc}")
 
-    print(f"\nDone. Figures in: {args.output_dir}")
+    print(f"\nDone. Figures in: {output_dir}")
 
 
 if __name__ == "__main__":

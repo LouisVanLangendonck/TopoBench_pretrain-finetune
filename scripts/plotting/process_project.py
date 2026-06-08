@@ -60,10 +60,14 @@ from scripts.plotting.wb_table import (
 SELECTION_ON_VALIDATION = "validation"
 SELECTION_ON_TEST = "test"
 
-DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "outputs" / "processed_projects"
+_OUTPUTS_BASE  = _SCRIPT_DIR / "outputs"
+DEFAULT_OUTPUT_DIR = _OUTPUTS_BASE / "processed_projects"   # legacy / fallback
 
-# Project name convention: finetune_{model}_pretrain_sweep_{pretraining_method}_{dataset_name}
-_PROJECT_NAME_RE = re.compile(r"^finetune_[^_]+_pretrain_sweep_[^_]+_(.+)$")
+# Fixed marker that separates the model name from the method+dataset in project names.
+# Convention: finetune_{model}_pretrain_sweep_{method}_{dataset_name}[_seedsub]
+# The model name may contain underscores (e.g. "gpse_backbone"), so we anchor on
+# this fixed substring instead of a simple [^_]+ regex.
+_PRETRAIN_SWEEP_MARKER = "_pretrain_sweep_"
 
 # Suffix appended to W&B project names when seed_subsample=True.
 # Stripped before looking up the dataset in local configs.
@@ -111,21 +115,36 @@ def load_dataset_monitor_info(
 def extract_finetune_dataset_name(project: str) -> str | None:
     """Parse the finetuning dataset name out of the W&B project name.
 
-    Convention: finetune_{model}_pretrain_sweep_{pretraining_method}_{dataset_name}
-    Examples:
-      finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY         -> IMDB-BINARY
-      finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ    -> Clearance_Hepatocyte_AZ
-      finetune_gin_pretrain_sweep_graphmaev2_BBB_Martins_seedsub -> BBB_Martins
-    The ``_seedsub`` suffix (from seed_subsample_project_suffix in sweep_config)
-    is stripped so the name matches the local dataset config files.
+    Convention: finetune_{model}_pretrain_sweep_{method}_{dataset_name}[_seedsub]
+
+    The model name may contain underscores (e.g. ``gpse_backbone``), so we
+    locate the fixed ``_pretrain_sweep_`` marker rather than relying on a
+    ``[^_]+`` token.  Method names never contain underscores (graphmaev2, dgi,
+    vgae, graphcl, bgrl …), so the first ``_`` after the marker separates the
+    method from the dataset name.
+
+    Examples
+    --------
+      finetune_gin_pretrain_sweep_graphmaev2_IMDB-BINARY              -> IMDB-BINARY
+      finetune_gin_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ         -> Clearance_Hepatocyte_AZ
+      finetune_gpse_backbone_pretrain_sweep_graphmaev2_BBB_Martins    -> BBB_Martins
+      finetune_gpse_backbone_pretrain_sweep_bgrl_BBB_Martins_seedsub  -> BBB_Martins
     """
-    m = _PROJECT_NAME_RE.match(project)
-    if not m:
-        return None
-    name = m.group(1)
+    name = project
     if name.endswith(_SEEDSUB_SUFFIX):
         name = name[: -len(_SEEDSUB_SUFFIX)]
-    return name
+
+    idx = name.find(_PRETRAIN_SWEEP_MARKER)
+    if idx == -1:
+        return None
+
+    # after_marker = "{method}_{dataset_name}"
+    after_marker = name[idx + len(_PRETRAIN_SWEEP_MARKER):]
+    sep = after_marker.find("_")
+    if sep == -1:
+        return None  # no dataset part found
+
+    return after_marker[sep + 1:]
 
 
 def sanitize_filename(project: str) -> str:
@@ -517,9 +536,15 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Process one W&B finetune project to CSV.")
     p.add_argument("--entity", required=True, help="W&B entity.")
     p.add_argument("--project", required=True, help="W&B finetune project name.")
+    p.add_argument(
+        "--model", default=None,
+        help="Model backbone ('gin' or 'gpse_backbone'). When set, output defaults to "
+             "outputs/{model}/processed_projects/. Overridden by --output-dir.",
+    )
     p.add_argument("--train-seeds", nargs="+", type=int, default=[0, 1, 2])
     p.add_argument("--state", default="finished", help="W&B state filter (empty = all).")
-    p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    p.add_argument("--output-dir", type=Path, default=None,
+                   help="Output directory for processed CSV (overrides --model default).")
     p.add_argument(
         "--select-on-test",
         action="store_true",
@@ -531,12 +556,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     state = args.state if args.state else None
+    if args.output_dir is not None:
+        output_dir = args.output_dir
+    elif args.model is not None:
+        output_dir = _OUTPUTS_BASE / args.model / "processed_projects"
+    else:
+        output_dir = DEFAULT_OUTPUT_DIR
     process_project(
         args.entity,
         args.project,
         expected_seeds=args.train_seeds,
         state=state or "finished",
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         select_on_test=args.select_on_test,
     )
 

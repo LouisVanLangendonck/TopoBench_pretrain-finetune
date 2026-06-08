@@ -22,9 +22,10 @@ from pathlib import Path
 
 import pandas as pd
 
-_SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_INPUT_DIR = _SCRIPT_DIR / "outputs" / "processed_projects"
-DEFAULT_OUTPUT_PATH = _SCRIPT_DIR / "outputs" / "aggregated_results.csv"
+_SCRIPT_DIR  = Path(__file__).resolve().parent
+_OUTPUTS_BASE = _SCRIPT_DIR / "outputs"
+DEFAULT_INPUT_DIR   = _OUTPUTS_BASE / "processed_projects"   # legacy / fallback
+DEFAULT_OUTPUT_PATH = _OUTPUTS_BASE / "aggregated_results.csv"  # legacy / fallback
 
 sys.path.insert(0, str(_SCRIPT_DIR.parents[1]))
 
@@ -75,14 +76,27 @@ def combine_processed_csvs(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Merge per-project processed CSVs.")
-    p.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
-    p.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    p.add_argument(
+        "--model", default=None,
+        help="Model backbone ('gin' or 'gpse_backbone'). When set, defaults to "
+             "outputs/{model}/processed_projects/ → outputs/{model}/aggregated_results.csv.",
+    )
+    p.add_argument("--input-dir", type=Path, default=None,
+                   help="Override input directory (overrides --model default).")
+    p.add_argument("--output", type=Path, default=None,
+                   help="Override output CSV path (overrides --model default).")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    combine_processed_csvs(args.input_dir, args.output)
+    if args.model is not None:
+        input_dir   = args.input_dir or _OUTPUTS_BASE / args.model / "processed_projects"
+        output_path = args.output    or _OUTPUTS_BASE / args.model / "aggregated_results.csv"
+    else:
+        input_dir   = args.input_dir   or DEFAULT_INPUT_DIR
+        output_path = args.output      or DEFAULT_OUTPUT_PATH
+    combine_processed_csvs(input_dir, output_path)
 
 
 if __name__ == "__main__":
