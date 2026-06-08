@@ -24,13 +24,33 @@ The formula is direction-agnostic: it works for both higher-is-better
 (accuracy, ROC-AUC) and lower-is-better (MAE, RMSE) metrics because
 ``worst`` and ``best`` are defined semantically.
 
-Structural-feature datasets (skip ablations)
---------------------------------------------
-Datasets such as IMDB-BINARY / IMDB-MULTI / REDDIT-BINARY derive their
-node features from structural properties (one-hot degree, equal Gaussian).
-For these datasets the feature–structure split is meaningless, so all
+Injection point: BEFORE CombinedPSEs
+--------------------------------------
+Ablation transforms are injected **immediately before** the ``CombinedPSEs``
+key in the transform pipeline (rather than prepended at the very start).
+This ensures that any dataset-specific feature-generating transforms that run
+first are respected:
+
+- Molecular datasets (raw features → CombinedPSEs):
+    [RandomizeNodeFeatures / ShuffleEdges] → CombinedPSEs
+    → PSEs see real topology; semantic features are destroyed / rewired.
+
+- IMDB-BINARY / IMDB-MULTI (node_degrees → one_hot_degree → CombinedPSEs):
+    node_degrees → one_hot_degree → [ablation] → CombinedPSEs
+    → Structural degree features are generated first, then the ablation is
+      applied, so PSEs see the real (or shuffled) graph post-feature-generation.
+
+- REDDIT-BINARY (equal_gaus_features → CombinedPSEs):
+    equal_gaus_features → [ablation] → CombinedPSEs
+    → Equal Gaussian features are assigned first, then optionally shuffled.
+
+Structural-feature datasets (``structural_feature_datasets``)
+--------------------------------------------------------------
+If a dataset name is listed in ``structural_feature_datasets`` (config), all
 ablation performances are set to ``null`` and importances to
-``feature_importance=0, structural_importance=1``.
+``feature_importance=0, structural_importance=1`` without running any
+experiments.  By default this list is empty — IMDB/REDDIT are now handled
+via the injection-before-CombinedPSEs approach above.
 """
 
 from __future__ import annotations
@@ -116,10 +136,21 @@ def _build_ablation_transforms_config(
     ablation: str,
     ablation_seed: int = 42,
 ) -> DictConfig | None:
-    """Prepend ablation pre-transforms to the base transforms config.
+    """Inject ablation pre-transforms immediately before ``CombinedPSEs``.
 
-    The resulting config has the ablation transform(s) listed FIRST so they
-    are applied before the PSE encoding steps (LapPE / RWSE).
+    The injection point is chosen as the position of the ``CombinedPSEs`` key
+    in the transform pipeline.  This guarantees that any dataset-specific
+    feature-generation transforms (e.g. ``node_degrees``,
+    ``one_hot_node_degree_features``, ``equal_gaus_features``) run first,
+    so the ablation acts on the features that the model would actually see
+    during training.
+
+    - For datasets where ``CombinedPSEs`` is the only transform (molecular),
+      the ablation transforms are effectively prepended — same as before.
+    - For IMDB/REDDIT-style datasets the ablation transforms are inserted
+      *between* the structural-feature step and the PSE encoding step.
+    - If no ``CombinedPSEs`` key is found the ablation transforms are
+      prepended as a safe fallback.
 
     Parameters
     ----------
@@ -135,12 +166,13 @@ def _build_ablation_transforms_config(
     Returns
     -------
     DictConfig | None
-        Modified transforms config with ablation transforms prepended.
+        Modified transforms config with ablation transforms injected before
+        ``CombinedPSEs``.
     """
     if ablation == "baseline":
         return base_transforms_cfg  # no modification
 
-    ablation_entries: dict = {}
+    ablation_entries: dict[str, dict] = {}
     if ablation in ("random_features", "both"):
         ablation_entries["RandomizeNodeFeatures_ablation"] = {
             "transform_name": "RandomizeNodeFeatures",
@@ -153,12 +185,30 @@ def _build_ablation_transforms_config(
         }
 
     if base_transforms_cfg is not None:
-        base_dict = OmegaConf.to_container(base_transforms_cfg, resolve=True)
+        base_dict: dict = OmegaConf.to_container(base_transforms_cfg, resolve=True)
     else:
         base_dict = {}
 
-    combined = OmegaConf.create({**ablation_entries, **base_dict})
-    return combined
+    # Find the CombinedPSEs key (exact match or key that contains "CombinedPSEs")
+    combined_pses_key: str | None = None
+    for key in base_dict:
+        if key == "CombinedPSEs" or "CombinedPSEs" in str(key):
+            combined_pses_key = key
+            break
+
+    if combined_pses_key is None:
+        # No CombinedPSEs found — fall back to prepending at the start
+        result_dict = {**ablation_entries, **base_dict}
+    else:
+        # Rebuild dict in order, inserting ablation transforms just before
+        # the CombinedPSEs entry.
+        result_dict = {}
+        for key, val in base_dict.items():
+            if key == combined_pses_key:
+                result_dict.update(ablation_entries)
+            result_dict[key] = val
+
+    return OmegaConf.create(result_dict)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

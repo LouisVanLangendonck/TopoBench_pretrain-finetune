@@ -93,12 +93,12 @@
     "num_connected_components_mean": 2.28,
     "num_connected_components_std": 2.1339165869358623
   },
-  "gpse_backbone_baseline_performance": null,
-  "gpse_backbone_random_features_performance": null,
-  "gpse_backbone_shuffled_edges_performance": null,
-  "gpse_backbone_random_features_shuffled_edges_performance": null,
-  "gpse_backbone_monitor_metric": null,
-  "gpse_backbone_monitor_mode": null,
-  "task_feature_importance": 0.0,
-  "task_structural_importance": 1.0
+  "gpse_backbone_baseline_performance": 0.8880000114440918,
+  "gpse_backbone_random_features_performance": 0.7739999890327454,
+  "gpse_backbone_shuffled_edges_performance": 0.7580000162124634,
+  "gpse_backbone_random_features_shuffled_edges_performance": 0.621999979019165,
+  "gpse_backbone_monitor_metric": "val/accuracy",
+  "gpse_backbone_monitor_mode": "max",
+  "task_feature_importance": 0.42857146058251205,
+  "task_structural_importance": 0.4887217270107602
 }
