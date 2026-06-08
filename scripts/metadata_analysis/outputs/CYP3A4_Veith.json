@@ -92,5 +92,13 @@
     "spectral_radius_std": 0.11200532170754676,
     "num_connected_components_mean": 1.0652879156528792,
     "num_connected_components_std": 0.34439589762134654
-  }
+  },
+  "gpse_backbone_baseline_performance": 0.7753446698188782,
+  "gpse_backbone_random_features_performance": 0.7173560261726379,
+  "gpse_backbone_shuffled_edges_performance": 0.6991078853607178,
+  "gpse_backbone_random_features_shuffled_edges_performance": 0.6248986124992371,
+  "gpse_backbone_monitor_metric": "val/accuracy",
+  "gpse_backbone_monitor_mode": "max",
+  "task_feature_importance": 0.38544475461418204,
+  "task_structural_importance": 0.5067383341006139
 }

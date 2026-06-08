@@ -19,8 +19,8 @@
 modes:
   - finetune-full
   - finetune-probe
-  - random-init-full
-  - random-init-probe
+  # - random-init-full
+  # - random-init-probe
 
 # ── Few-shot fractions of TRAINING NODES ──────────────────────────────────────
 # E.g. for Cora with ~1354 training nodes (train_prop=0.5):
@@ -71,25 +71,25 @@ batch_size: null
 entity: louis-van-langendonck-universitat-polit-cnica-de-catalunya
 projects:
   # ── GraphMAEv2 ──
-  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_cora
-  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_pubmed
-  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_minesweeper
-  - gpse_backbone_pretrain_sweep_transductive_graphmaev2_roman_empire
+  # - gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_cora
+  # - gpse_backbone_pretrain_sweep_transductive_graphmaev2_cocitation_pubmed
+  # - gpse_backbone_pretrain_sweep_transductive_graphmaev2_minesweeper
+  # - gpse_backbone_pretrain_sweep_transductive_graphmaev2_roman_empire
   # ── DGI ──
-  # - gpse_backbone_pretrain_sweep_transductive_dgi_cocitation_cora
-  # - gpse_backbone_pretrain_sweep_transductive_dgi_cocitation_pubmed
-  # - gpse_backbone_pretrain_sweep_transductive_dgi_minesweeper
-  # - gpse_backbone_pretrain_sweep_transductive_dgi_roman_empire
+  - gpse_backbone_pretrain_sweep_transductive_dgi_cocitation_cora
+  - gpse_backbone_pretrain_sweep_transductive_dgi_cocitation_pubmed
+  - gpse_backbone_pretrain_sweep_transductive_dgi_minesweeper
+  - gpse_backbone_pretrain_sweep_transductive_dgi_roman_empire
   # ── BGRL ──
-  # - gpse_backbone_pretrain_sweep_transductive_bgrl_cocitation_cora
-  # - gpse_backbone_pretrain_sweep_transductive_bgrl_cocitation_pubmed
-  # - gpse_backbone_pretrain_sweep_transductive_bgrl_minesweeper
-  # - gpse_backbone_pretrain_sweep_transductive_bgrl_roman_empire
+  - gpse_backbone_pretrain_sweep_transductive_bgrl_cocitation_cora
+  - gpse_backbone_pretrain_sweep_transductive_bgrl_cocitation_pubmed
+  - gpse_backbone_pretrain_sweep_transductive_bgrl_minesweeper
+  - gpse_backbone_pretrain_sweep_transductive_bgrl_roman_empire
   # ── VGAE ──
-  # - gpse_backbone_pretrain_sweep_transductive_vgae_cocitation_cora
-  # - gpse_backbone_pretrain_sweep_transductive_vgae_cocitation_pubmed
-  # - gpse_backbone_pretrain_sweep_transductive_vgae_minesweeper
-  # - gpse_backbone_pretrain_sweep_transductive_vgae_roman_empire
+  - gpse_backbone_pretrain_sweep_transductive_vgae_cocitation_cora
+  - gpse_backbone_pretrain_sweep_transductive_vgae_cocitation_pubmed
+  - gpse_backbone_pretrain_sweep_transductive_vgae_minesweeper
+  - gpse_backbone_pretrain_sweep_transductive_vgae_roman_empire
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 # Number of concurrent GPU workers.  Set to the number of available GPUs.

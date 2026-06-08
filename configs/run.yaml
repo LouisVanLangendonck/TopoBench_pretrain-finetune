@@ -4,11 +4,11 @@
 # order of defaults determines the order in which configs override each other
 defaults:
   - _self_
-  - dataset: graph/cocitation_cora
+  - dataset: graph/BBB_Martins
   - model: graph/gpse_backbone
 
   # Set to none to skip pretraining
-  - pretraining: bgrl
+  - pretraining: none
 
   # Transforms: use the pretraining-specific transform when one exists.
   - transforms: ${get_pretraining_transform:${dataset},${model},${pretraining}}

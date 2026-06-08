@@ -7,8 +7,23 @@ For each dataset listed in the config YAML the script:
      pre_transforms (e.g. one-hot degree features for IMDB-BINARY, OGB atom
      features for molecular datasets).
   2. Applies the same train/val/test split (same seed) as the pretraining runs.
-  3. Computes 29 graph-level metadata features for each split separately.
+  3. Computes graph-level metadata features for each split separately.
   4. Saves results to ``<output_dir>/<DatasetName>.json``.
+
+Incremental / additive runs
+----------------------------
+Features toggled to ``false`` in the config are skipped entirely — they are
+**not** recomputed and their existing values in the output JSON are preserved.
+This means you can run the script multiple times with different subsets of
+features enabled and the JSON will accumulate all results without wasting time
+re-running features that were already computed.
+
+Concretely, when an output file already exists:
+  - Each split dict (train / val / test) is updated with the newly computed
+    keys only.  Pre-existing keys that were not enabled this run are kept as-is.
+  - Top-level metadata (dataset, model, pretraining, data_seed) is refreshed.
+
+Default output directory: ``scripts/metadata_analysis/outputs/<DatasetName>.json``
 
 Usage
 -----
@@ -155,6 +170,44 @@ def analyse_dataset(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Result merging
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _merge_result(existing: dict, new: dict) -> dict:
+    """Merge newly-computed features into an existing result dict.
+
+    Rules
+    -----
+    - Top-level metadata keys (dataset, model, pretraining, data_seed) are
+      always refreshed from *new*.
+    - Each split sub-dict (train / val / test) is merged with
+      ``existing_split | new_split``: keys present in *new* overwrite the
+      corresponding key in *existing*, but keys that only exist in *existing*
+      (i.e. features that were disabled / skipped this run) are kept intact.
+    - Any other top-level keys that appear in *new* but are not splits or
+      standard metadata (e.g. importance scores added by run_importance.py)
+      are written directly into *merged*, overriding the existing value.
+    - All top-level keys in *existing* that are absent from *new* are
+      preserved unchanged.
+    """
+    merged = dict(existing)
+    _metadata = {"dataset", "model", "pretraining", "data_seed"}
+    _splits = {"train", "val", "test"}
+    _handled = _metadata | _splits
+
+    for k in _metadata:
+        if k in new:
+            merged[k] = new[k]
+    for split in _splits:
+        if split in new:
+            merged[split] = {**existing.get(split, {}), **new[split]}
+    for k, v in new.items():
+        if k not in _handled:
+            merged[k] = v
+    return merged
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -221,7 +274,7 @@ def main(argv=None):
     model       = args.model       or cfg.get("model", "graph/gin")
     pretraining = args.pretraining or cfg.get("pretraining", "dgi")
     data_seed   = args.data_seed   if args.data_seed is not None else cfg.get("data_seed", 0)
-    output_dir  = Path(args.output_dir or cfg.get("output_dir", "outputs/metadata_analysis"))
+    output_dir  = Path(args.output_dir or cfg.get("output_dir", str(_SCRIPT_DIR / "outputs")))
     features    = cfg.get("features", {})
 
     if not datasets:
@@ -270,9 +323,20 @@ def main(argv=None):
             continue
 
         out_path = output_dir / f"{dataset_name}.json"
+        if out_path.exists():
+            try:
+                with open(out_path) as fh:
+                    existing = json.load(fh)
+                result = _merge_result(existing, result)
+                action = "Updated (merged)"
+            except Exception as exc:
+                print(f"  WARNING: could not read {out_path} — will overwrite. ({exc})")
+                action = "Overwritten (read error)"
+        else:
+            action = "Created"
         with open(out_path, "w") as fh:
             json.dump(result, fh, indent=2)
-        print(f"  Saved → {out_path}")
+        print(f"  {action} → {out_path}")
         successes.append(dataset)
 
     # ── Summary ───────────────────────────────────────────────────────────────

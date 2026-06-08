@@ -92,5 +92,13 @@
     "spectral_radius_std": 0.5216768478009253,
     "num_connected_components_mean": 1.10752688172043,
     "num_connected_components_std": 0.6243970383207732
-  }
+  },
+  "gpse_backbone_baseline_performance": null,
+  "gpse_backbone_random_features_performance": null,
+  "gpse_backbone_shuffled_edges_performance": null,
+  "gpse_backbone_random_features_shuffled_edges_performance": null,
+  "gpse_backbone_monitor_metric": null,
+  "gpse_backbone_monitor_mode": null,
+  "task_feature_importance": null,
+  "task_structural_importance": null
 }
