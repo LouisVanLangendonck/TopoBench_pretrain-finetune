@@ -15,7 +15,7 @@ parameters:
   num_classes: 1  # Regression task
   task: regression
   loss_type: mse
-  monitor_metric: mae
+  monitor_metric: mse
   task_level: graph
   max_dim_if_lifted: 3
   preserve_edge_attr_if_lifted: ${set_preserve_edge_attr:${model.model_name},True}
