@@ -100,5 +100,17 @@
   "gpse_backbone_monitor_metric": "val/accuracy",
   "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 0.8333330573860062,
-  "task_structural_importance": 0.0
+  "task_structural_importance": 0.0,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.699999988079071,
+    "val_score": 0.7680000066757202,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "yz1fkxd5",
+    "best_run_name": "comic-aardvark-186",
+    "best_hidden_channels": 128,
+    "best_num_layers": 4,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
 }

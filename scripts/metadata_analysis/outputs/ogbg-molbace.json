@@ -100,5 +100,17 @@
   "gpse_backbone_monitor_metric": "val/auroc",
   "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 0.9225222888236257,
-  "task_structural_importance": 0.07747771117637436
+  "task_structural_importance": 0.07747771117637436,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.8021213412284851,
+    "val_score": 0.8145604133605957,
+    "monitor_metric": "auroc",
+    "higher_better": true,
+    "best_run_id": "u785xock",
+    "best_run_name": "atomic-aardvark-119",
+    "best_hidden_channels": 128,
+    "best_num_layers": 6,
+    "best_weight_decay": 0.001,
+    "best_lr": 0.001
+  }
 }

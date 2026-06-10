@@ -100,5 +100,17 @@
   "gpse_backbone_monitor_metric": "val/mse",
   "gpse_backbone_monitor_mode": "min",
   "task_feature_importance": 0.9665542649662449,
-  "task_structural_importance": 0.20873148036638522
+  "task_structural_importance": 0.20873148036638522,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 2406.031982421875,
+    "val_score": 1853.4058837890625,
+    "monitor_metric": "mse",
+    "higher_better": false,
+    "best_run_id": "fltglgok",
+    "best_run_name": "stoic-bee-76",
+    "best_hidden_channels": 128,
+    "best_num_layers": 2,
+    "best_weight_decay": 0.001,
+    "best_lr": 0.01
+  }
 }
