@@ -379,3 +379,76 @@ def compute_split_features(
         )
 
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Property shift (train → test distribution distance)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BOUNDED_PROPERTIES = [
+    "edge_density",
+    "avg_clustering_coef",
+    "transitivity",
+    "gini_degree",
+    "degree_assortativity",
+]  # already in ~[0,1] or [-1,1]; raw absolute difference is interpretable
+
+_UNBOUNDED_PROPERTIES = [
+    "num_nodes",
+    "num_edges",
+    "avg_degree",
+    "pseudo_diameter",
+    "spectral_gap",
+    "spectral_radius",
+    "degeneracy",
+]  # normalised by pooled std to make scale-invariant
+
+
+def compute_property_shift(train_stats: dict, test_stats: dict) -> float | None:
+    """Compute a crude overall property-shift score between two split feature dicts.
+
+    For each property the per-split dicts must contain ``{property}_mean`` (and
+    ``{property}_std`` for unbounded properties).  Properties whose values are
+    missing or None in either split are silently skipped.
+
+    Bounded properties  (edge_density, avg_clustering_coef, transitivity,
+    gini_degree, degree_assortativity):
+        shift = |test_mean − train_mean|
+
+    Unbounded properties  (num_nodes, num_edges, avg_degree, pseudo_diameter,
+    spectral_gap, spectral_radius, degeneracy):
+        pooled_std = sqrt((train_std² + test_std²) / 2)
+        shift = |test_mean − train_mean| / max(pooled_std, 1e-6)
+
+    Returns the **median** of all valid per-property shifts, or ``None`` if no
+    property could be evaluated.
+    """
+    shifts: list[float] = []
+
+    for p in _BOUNDED_PROPERTIES:
+        tr = train_stats.get(f"{p}_mean")
+        te = test_stats.get(f"{p}_mean")
+        if tr is None or te is None:
+            continue
+        try:
+            shifts.append(abs(float(te) - float(tr)))
+        except (TypeError, ValueError):
+            continue
+
+    for p in _UNBOUNDED_PROPERTIES:
+        tr_mean = train_stats.get(f"{p}_mean")
+        te_mean = test_stats.get(f"{p}_mean")
+        tr_std  = train_stats.get(f"{p}_std")
+        te_std  = test_stats.get(f"{p}_std")
+        if tr_mean is None or te_mean is None or tr_std is None or te_std is None:
+            continue
+        try:
+            pooled_std = math.sqrt((float(tr_std) ** 2 + float(te_std) ** 2) / 2)
+            shift = abs(float(te_mean) - float(tr_mean)) / max(pooled_std, 1e-6)
+            shifts.append(shift)
+        except (TypeError, ValueError):
+            continue
+
+    if not shifts:
+        return None
+    return _to_json_safe(float(np.median(shifts)))

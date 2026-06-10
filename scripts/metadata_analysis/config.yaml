@@ -19,13 +19,13 @@
 # Mirror the list in scripts/pretraining/gin_pretrain_sweep.sh; comment out
 # any datasets you want to skip.
 datasets:
-  # - "graph/BBB_Martins"
-  # - "graph/CYP3A4_Veith"
-  # - "graph/ogbg-molhiv"
+  - "graph/BBB_Martins"
+  - "graph/CYP3A4_Veith"
+  - "graph/ogbg-molhiv"
   # - "graph/MUTAG"
   # - "graph/PROTEINS"
   # - "graph/Caco2_Wang"
-  # - "graph/Clearance_Hepatocyte_AZ"
+  - "graph/Clearance_Hepatocyte_AZ"
   # - "graph/ogbg-molbace"
   - "graph/IMDB-BINARY"
   - "graph/REDDIT-BINARY"
@@ -80,6 +80,17 @@ features:
   # datasets; one-hot degree component for social datasets such as IMDB-BINARY).
   # Falls back to degree assortativity when data.x is unavailable.
   attribute_assortativity: false
+
+  # ── Property-shift strength (1 scalar, dataset-level) ─────────────────────
+  # Median per-property shift between train and test splits.
+  # Bounded props (edge_density, avg_clustering_coef, transitivity,
+  #   gini_degree, degree_assortativity): raw absolute difference.
+  # Unbounded props (num_nodes, num_edges, avg_degree, pseudo_diameter,
+  #   spectral_gap, spectral_radius, degeneracy): pooled-std-normalised diff.
+  # Requires the relevant per-property mean/std keys to be present; missing
+  # properties are silently skipped.  Stored at the top level of the JSON as
+  # "property_shift_strength_train_test".
+  property_shift: true
 
 
 # ==============================================================================

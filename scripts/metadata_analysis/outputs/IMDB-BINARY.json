@@ -112,5 +112,6 @@
     "best_num_layers": 4,
     "best_weight_decay": 0,
     "best_lr": 0.01
-  }
+  },
+  "property_shift_strength_train_test": 0.09015513343251567
 }

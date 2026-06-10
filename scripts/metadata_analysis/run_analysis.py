@@ -60,7 +60,7 @@ _PROJECT_ROOT = _SCRIPT_DIR.parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from compute_metrics import compute_split_features  # noqa: E402  (local import)
+from compute_metrics import compute_split_features, compute_property_shift  # noqa: E402  (local import)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,6 +334,14 @@ def main(argv=None):
                 action = "Overwritten (read error)"
         else:
             action = "Created"
+
+        # Property shift is computed after the merge so it always sees the full
+        # accumulated split data, regardless of which features were enabled this run.
+        if features.get("property_shift", True):
+            result["property_shift_strength_train_test"] = compute_property_shift(
+                result.get("train", {}), result.get("test", {})
+            )
+
         with open(out_path, "w") as fh:
             json.dump(result, fh, indent=2)
         print(f"  {action} → {out_path}")

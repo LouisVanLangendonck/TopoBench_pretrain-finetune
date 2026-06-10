@@ -100,5 +100,18 @@
   "gpse_backbone_monitor_metric": "val/accuracy",
   "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 0.42857146058251205,
-  "task_structural_importance": 0.4887217270107602
+  "task_structural_importance": 0.4887217270107602,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.9039999842643738,
+    "val_score": 0.9120000004768372,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "wxvg2rlo",
+    "best_run_name": "peach-oath-238",
+    "best_hidden_channels": 256,
+    "best_num_layers": 6,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  },
+  "property_shift_strength_train_test": 0.01706268293850898
 }
