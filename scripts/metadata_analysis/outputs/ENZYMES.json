@@ -104,5 +104,17 @@
   "gpse_backbone_monitor_metric": "val/auroc",
   "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 0.8367511836483974,
-  "task_structural_importance": 0.7687676022618087
+  "task_structural_importance": 0.7687676022618087,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.7337258458137512,
+    "val_score": 0.7121033072471619,
+    "monitor_metric": "auroc",
+    "higher_better": true,
+    "best_run_id": "m39xqkom",
+    "best_run_name": "efficient-dream-526",
+    "best_hidden_channels": 256,
+    "best_num_layers": 6,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
 }

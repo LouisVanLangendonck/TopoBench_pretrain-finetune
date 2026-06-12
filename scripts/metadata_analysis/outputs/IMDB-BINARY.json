@@ -26,12 +26,13 @@
     "degeneracy_std": 5.698075464575737,
     "gini_degree_mean": 0.14215847529626258,
     "gini_degree_std": 0.07741817249761242,
-    "spectral_gap_mean": 4.02705006603427,
-    "spectral_gap_std": 6.548497116889765,
+    "spectral_gap_mean": 4.027050066034269,
+    "spectral_gap_std": 6.548497116889763,
     "spectral_radius_mean": 10.378598241678082,
     "spectral_radius_std": 5.55800830233532,
     "num_connected_components_mean": 1.0,
-    "num_connected_components_std": 0.0
+    "num_connected_components_std": 0.0,
+    "attribute_assortativity": null
   },
   "val": {
     "num_graphs": 250,
@@ -57,11 +58,12 @@
     "gini_degree_mean": 0.15253745275759917,
     "gini_degree_std": 0.07682104527059425,
     "spectral_gap_mean": 3.5519632563885084,
-    "spectral_gap_std": 6.1567985189601515,
+    "spectral_gap_std": 6.15679851896015,
     "spectral_radius_mean": 9.85399724333287,
-    "spectral_radius_std": 5.143136460389022,
+    "spectral_radius_std": 5.143136460389023,
     "num_connected_components_mean": 1.0,
-    "num_connected_components_std": 0.0
+    "num_connected_components_std": 0.0,
+    "attribute_assortativity": null
   },
   "test": {
     "num_graphs": 250,
@@ -86,32 +88,25 @@
     "degeneracy_std": 4.607270775632792,
     "gini_degree_mean": 0.15543662954581233,
     "gini_degree_std": 0.07512744885044868,
-    "spectral_gap_mean": 3.091827404406851,
-    "spectral_gap_std": 5.146410094310954,
+    "spectral_gap_mean": 3.0918274044068497,
+    "spectral_gap_std": 5.146410094310951,
     "spectral_radius_mean": 9.504910374752457,
-    "spectral_radius_std": 4.447233960086703,
+    "spectral_radius_std": 4.447233960086702,
     "num_connected_components_mean": 1.0,
-    "num_connected_components_std": 0.0
+    "num_connected_components_std": 0.0,
+    "attribute_assortativity": null
   },
-  "gpse_backbone_baseline_performance": 0.6880000233650208,
-  "gpse_backbone_random_features_performance": 0.628000020980835,
-  "gpse_backbone_shuffled_edges_performance": 0.7120000123977661,
-  "gpse_backbone_random_features_shuffled_edges_performance": 0.6159999966621399,
-  "gpse_backbone_monitor_metric": "val/accuracy",
-  "gpse_backbone_monitor_mode": "max",
-  "task_feature_importance": 0.8333330573860062,
-  "task_structural_importance": 0.0,
+  "property_shift_strength_train_test": 0.09015513343251567,
   "GPSE_backbone_hyperparam_best_test": {
     "test_score": 0.699999988079071,
-    "val_score": 0.7680000066757202,
+    "val_score": 0.7360000014305115,
     "monitor_metric": "accuracy",
     "higher_better": true,
-    "best_run_id": "yz1fkxd5",
-    "best_run_name": "comic-aardvark-186",
+    "best_run_id": "0iemau2d",
+    "best_run_name": "blooming-darkness-433",
     "best_hidden_channels": 128,
-    "best_num_layers": 4,
-    "best_weight_decay": 0,
+    "best_num_layers": 6,
+    "best_weight_decay": 0.001,
     "best_lr": 0.01
-  },
-  "property_shift_strength_train_test": 0.09015513343251567
+  }
 }

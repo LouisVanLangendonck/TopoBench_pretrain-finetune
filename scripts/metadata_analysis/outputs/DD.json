@@ -104,5 +104,17 @@
   "gpse_backbone_monitor_metric": "val/accuracy",
   "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 0.9230768190333205,
-  "task_structural_importance": 0.153846361933359
+  "task_structural_importance": 0.153846361933359,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.7457627058029175,
+    "val_score": 0.7687074542045593,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "4qpcswf7",
+    "best_run_name": "autumn-gorge-482",
+    "best_hidden_channels": 256,
+    "best_num_layers": 2,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
 }

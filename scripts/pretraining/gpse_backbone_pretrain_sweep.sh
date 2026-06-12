@@ -164,7 +164,6 @@ FIXED_ARGS=(
     "model=graph/gpse_backbone"
     "model.backbone.dropout=0.0"
     "model.feature_encoder.proj_dropout=0.2"
-    "dataset.dataloader_params.batch_size=256"
     "trainer.max_epochs=400"
     "trainer.min_epochs=10"
     "trainer.check_val_every_n_epoch=2"
@@ -446,6 +445,13 @@ while IFS=";" read -r run_name dynamic_args_str; do
         if [[ "${arg}" == dataset=*      ]]; then dataset_val=$(basename "${arg#*=}"); fi
     done
 
+    # ── Batch size: COLLAB uses 128, all other datasets use 256 ─────────────
+    if [[ "${dataset_val}" == "COLLAB" ]]; then
+        batch_size=128
+    else
+        batch_size=256
+    fi
+
     # ── Per-method fixed overrides (not swept, not in run name) ──────────────
     method_fixed_args=()
     case "${pretrain_method}" in
@@ -464,6 +470,7 @@ while IFS=";" read -r run_name dynamic_args_str; do
         "${DYNAMIC_ARGS_ARRAY[@]}"
         "${FIXED_ARGS[@]}"
         "${method_fixed_args[@]}"
+        "dataset.dataloader_params.batch_size=${batch_size}"
         "trainer.devices=[${current_gpu}]"
         "+logger.wandb.entity=${WANDB_ENTITY}"
         "logger.wandb.project=${dynamic_project}"
