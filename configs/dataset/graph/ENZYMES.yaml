@@ -4,18 +4,16 @@ loader:
   parameters:
     data_domain: graph
     data_type: TUDataset
-    data_name: IMDB-BINARY
+    data_name: ENZYMES
     data_dir: ${paths.data_dir}/${dataset.loader.parameters.data_domain}/${dataset.loader.parameters.data_type}
 
 # Dataset parameters
 parameters:
-  num_features: 10
-  max_node_degree: 135
-  # max_x_1_degree: 135
-  num_classes: 2
+  num_features: 3 # here basically I specify the initial num features in PROTEINS at x aka x_0
+  num_classes: 6
   task: classification
   loss_type: cross_entropy
-  monitor_metric: accuracy
+  monitor_metric: auroc
   task_level: graph
 
 #splits
@@ -29,6 +27,6 @@ split_params:
 
 # Dataloader parameters
 dataloader_params:
-  batch_size: 64
+  batch_size: 128 # We have an issue with allowing multiple graphs in a batch due to sparse incidences
   num_workers: 0
   pin_memory: False

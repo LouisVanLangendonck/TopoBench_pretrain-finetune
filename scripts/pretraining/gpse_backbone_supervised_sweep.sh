@@ -118,16 +118,22 @@ for i in "${!gpus[@]}"; do slot_pids[$i]=0; done
 
 # --- Datasets ---
 datasets=(
-    "graph/BBB_Martins"
-    "graph/CYP3A4_Veith"
-    "graph/PROTEINS"
-    "graph/Clearance_Hepatocyte_AZ"
-    "graph/ogbg-molbace"
-    "graph/ogbg-molhiv"
+    # "graph/BBB_Martins"
+    # "graph/CYP3A4_Veith"
+    # "graph/PROTEINS"
+    # "graph/Clearance_Hepatocyte_AZ"
+    # "graph/ogbg-molbace"
+    # "graph/ogbg-molhiv"
     "graph/IMDB-BINARY"
-    "graph/REDDIT-BINARY"
-    "graph/Caco2_Wang"
-    "graph/NCI1"
+    # "graph/REDDIT-BINARY"
+    # "graph/Caco2_Wang"
+    # "graph/NCI1"
+    # graph/PPBR_AZ
+    # graph/CYP2C9_Veith
+    # graph/Clearance_Microsome_AZ
+    - "graph/DD"
+    - "graph/ENZYMES"
+    - "graph/COLLAB"
 )
 
 # --- GPSE backbone architecture hyperparameters ---

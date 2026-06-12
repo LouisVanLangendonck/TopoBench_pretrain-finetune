@@ -127,13 +127,14 @@ datasets=(
     # "graph/PROTEINS"
     # "graph/Clearance_Hepatocyte_AZ"
     # "graph/ogbg-molhiv"
-    # "graph/IMDB-BINARY"
     # "graph/REDDIT-BINARY"
-    "graph/PPBR_AZ"
-    "graph/CYP2C9_Veith"
-    "graph/Clearance_Microsome_AZ"
-    # "graph/Caco2_Wang"
-    #graph/NCI1
+    # "graph/PPBR_AZ"
+    # "graph/CYP2C9_Veith"
+    # "graph/Clearance_Microsome_AZ"
+    "graph/DD"
+    "graph/ENZYMES"
+    "graph/COLLAB"
+    "graph/IMDB-BINARY"
 )
 
 # --- GSPE_backbone architecture hyperparameters (shared across all methods) ---

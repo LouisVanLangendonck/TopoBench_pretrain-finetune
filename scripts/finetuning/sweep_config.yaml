@@ -9,8 +9,8 @@
 #   random-init-full   randomise ALL weights; train everything
 #   random-init-probe  randomise ALL weights; freeze encoder; train readout only
 modes:
-  - finetune-full
-  - finetune-probe
+  # - finetune-full
+  # - finetune-probe
   - random-init-full
   - random-init-probe
 
@@ -66,37 +66,52 @@ projects:
   # - gpse_backbone_pretrain_sweep_graphmaev2_CYP3A4_Veith
   # - gpse_backbone_pretrain_sweep_graphmaev2_IMDB-BINARY
   # #- gpse_backbone_pretrain_sweep_graphmaev2_PROTEINS
-  - gpse_backbone_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ
+  #- gpse_backbone_pretrain_sweep_graphmaev2_Clearance_Hepatocyte_AZ
   #- gpse_backbone_pretrain_sweep_graphmaev2_ogbg-molhiv
   # # - gpse_backbone_pretrain_sweep_dgi_BBB_Martins
   # # - gpse_backbone_pretrain_sweep_dgi_CYP3A4_Veith
   #- gpse_backbone_pretrain_sweep_dgi_IMDB-BINARY
   # # - gpse_backbone_pretrain_sweep_dgi_PROTEINS
-  # # - gpse_backbone_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
+  #- gpse_backbone_pretrain_sweep_dgi_Clearance_Hepatocyte_AZ
   # - gpse_backbone_pretrain_sweep_dgi_ogbg-molhiv
   # # - gpse_backbone_pretrain_sweep_vgae_BBB_Martins
   # # - gpse_backbone_pretrain_sweep_vgae_CYP3A4_Veith
   #- gpse_backbone_pretrain_sweep_vgae_IMDB-BINARY
   # # - gpse_backbone_pretrain_sweep_vgae_PROTEINS
-  # # - gpse_backbone_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
+  #- gpse_backbone_pretrain_sweep_vgae_Clearance_Hepatocyte_AZ
   # - gpse_backbone_pretrain_sweep_vgae_ogbg-molhiv
   # # - gpse_backbone_pretrain_sweep_graphcl_BBB_Martins
   # # - gpse_backbone_pretrain_sweep_graphcl_CYP3A4_Veith
   #- gpse_backbone_pretrain_sweep_graphcl_IMDB-BINARY
   # # - gpse_backbone_pretrain_sweep_graphcl_PROTEINS
-  # # - gpse_backbone_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
+  #- gpse_backbone_pretrain_sweep_graphcl_Clearance_Hepatocyte_AZ
   # - gpse_backbone_pretrain_sweep_graphcl_ogbg-molhiv
   # # - gpse_backbone_pretrain_sweep_bgrl_BBB_Martins
   # # - gpse_backbone_pretrain_sweep_bgrl_CYP3A4_Veith
   #- gpse_backbone_pretrain_sweep_bgrl_IMDB-BINARY
   # # - gpse_backbone_pretrain_sweep_bgrl_PROTEINS
-  # # - gpse_backbone_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
+  #- gpse_backbone_pretrain_sweep_bgrl_Clearance_Hepatocyte_AZ
   # - gpse_backbone_pretrain_sweep_bgrl_ogbg-molhiv
   # - gpse_backbone_pretrain_sweep_graphmaev2_REDDIT-BINARY
   # - gpse_backbone_pretrain_sweep_dgi_REDDIT-BINARY
   # - gpse_backbone_pretrain_sweep_vgae_REDDIT-BINARY
   # - gpse_backbone_pretrain_sweep_graphcl_REDDIT-BINARY
   # - gpse_backbone_pretrain_sweep_bgrl_REDDIT-BINARY
+  - gpse_backbone_pretrain_sweep_graphmaev2_PPBR_AZ
+  - gpse_backbone_pretrain_sweep_graphmaev2_CYP2C9_Veith
+  - gpse_backbone_pretrain_sweep_graphmaev2_Clearance_Microsome_AZ
+  # - gpse_backbone_pretrain_sweep_dgi_PPBR_AZ
+  # - gpse_backbone_pretrain_sweep_dgi_CYP2C9_Veith
+  # - gpse_backbone_pretrain_sweep_dgi_Clearance_Microsome_AZ
+  # - gpse_backbone_pretrain_sweep_vgae_PPBR_AZ
+  # - gpse_backbone_pretrain_sweep_vgae_CYP2C9_Veith
+  # - gpse_backbone_pretrain_sweep_vgae_Clearance_Microsome_AZ
+  # - gpse_backbone_pretrain_sweep_graphcl_PPBR_AZ
+  # - gpse_backbone_pretrain_sweep_graphcl_CYP2C9_Veith
+  # - gpse_backbone_pretrain_sweep_graphcl_Clearance_Microsome_AZ
+  # - gpse_backbone_pretrain_sweep_bgrl_PPBR_AZ
+  # - gpse_backbone_pretrain_sweep_bgrl_CYP2C9_Veith
+  # - gpse_backbone_pretrain_sweep_bgrl_Clearance_Microsome_AZ
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 # Number of concurrent GPU workers.  Set to the number of available GPUs.
