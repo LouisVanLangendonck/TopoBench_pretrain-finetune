@@ -108,5 +108,26 @@
     "best_num_layers": 6,
     "best_weight_decay": 0.001,
     "best_lr": 0.01
-  }
+  },
+  "gpse_backbone_baseline_performance": null,
+  "gpse_backbone_random_features_performance": null,
+  "gpse_backbone_shuffled_edges_performance": null,
+  "gpse_backbone_random_features_shuffled_edges_performance": null,
+  "gpse_backbone_monitor_metric": null,
+  "gpse_backbone_monitor_mode": null,
+  "task_feature_importance": 0.0,
+  "task_structural_importance": 1.0,
+  "task_depth": 4,
+  "task_depth_performances": {
+    "1": 0.7360000014305115,
+    "2": 0.7080000042915344,
+    "3": 0.7200000286102295,
+    "4": 0.7400000095367432,
+    "5": 0.6759999990463257,
+    "6": 0.6800000071525574,
+    "7": 0.6880000233650208,
+    "8": 0.7120000123977661
+  },
+  "task_depth_monitor_metric": "val/accuracy",
+  "task_depth_monitor_mode": "max"
 }

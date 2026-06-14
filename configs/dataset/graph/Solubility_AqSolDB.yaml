@@ -4,7 +4,7 @@ loader:
   parameters: 
     data_domain: graph
     data_type: ADME
-    data_name: Caco2_Wang
+    data_name: Solubility_AqSolDB
     data_dir: ${paths.data_dir}/${dataset.loader.parameters.data_domain}/${dataset.loader.parameters.data_type}
 
 # Dataset parameters

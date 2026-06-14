@@ -320,6 +320,7 @@ def _run_one_ablation(
     ablation: str,
     ablation_seed: int,
     train_cfg: dict,
+    extra_cfg_overrides: list[str] | None = None,
 ) -> tuple[float | None, str, str]:
     """Train a fresh gpse_backbone and return (test_performance, monitor_metric, monitor_mode).
 
@@ -327,6 +328,9 @@ def _run_one_ablation(
     ----------
     train_cfg :
         Must contain ``max_epochs``, ``patience``, ``seed``, ``device``.
+    extra_cfg_overrides :
+        Additional Hydra overrides forwarded to ``_compose_cfg`` (e.g.
+        ``["model.backbone.num_layers=3"]``).
     """
     from lightning import Trainer
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
@@ -338,7 +342,7 @@ def _run_one_ablation(
     patience = int(train_cfg.get("patience", 20))
     seed = int(train_cfg.get("seed", 42))
 
-    cfg = _compose_cfg(dataset, model, pretraining, data_seed)
+    cfg = _compose_cfg(dataset, model, pretraining, data_seed, extra_cfg_overrides)
     monitor_metric, monitor_mode = _get_monitor(cfg)
 
     print(f"    [{ablation}] Building datamodule …")
@@ -577,3 +581,111 @@ def compute_dataset_importance(
     result["task_structural_importance"] = struct_imp
 
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task-depth estimation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_dataset_depth(
+    dataset: str,
+    model: str,
+    pretraining: str,
+    data_seed: int,
+    train_cfg: dict,
+    max_layers: int = 8,
+    ablation_seed: int = 42,
+) -> dict:
+    """Estimate task depth by sweeping ``num_layers`` from 1 to *max_layers*.
+
+    A baseline (real features + real structure) supervised run is performed for
+    each layer count.  The layer count that achieves the best test-set
+    performance (according to the dataset's own monitor metric and direction) is
+    stored as ``task_depth``.
+
+    Parameters
+    ----------
+    dataset :
+        Hydra dataset override string, e.g. ``"graph/MUTAG"``.
+    model :
+        Hydra model override string, e.g. ``"graph/gpse_backbone"``.
+    pretraining :
+        Pretraining override (usually ``"none"`` for supervised training).
+    data_seed :
+        Random seed for the train/val/test split.
+    train_cfg :
+        Dict with keys ``max_epochs``, ``patience``, ``seed``, ``device``.
+    max_layers :
+        Upper bound of the layer sweep (inclusive).  Default 8.
+    ablation_seed :
+        Passed through to ``_run_one_ablation`` (unused for baseline but kept
+        for API consistency).
+
+    Returns
+    -------
+    dict
+        Top-level keys ready to be merged into the dataset JSON:
+
+        - ``task_depth``                    – int, best layer count (or ``null``)
+        - ``task_depth_performances``       – dict mapping str(n_layers) → float|null
+        - ``task_depth_monitor_metric``     – metric name used for comparison
+        - ``task_depth_monitor_mode``       – ``"max"`` or ``"min"``
+    """
+    dataset_name = dataset.split("/")[-1]
+
+    # Resolve monitor direction once from the base config
+    base_cfg = _compose_cfg(dataset, model, pretraining, data_seed)
+    monitor_metric, monitor_mode = _get_monitor(base_cfg)
+
+    performances: dict[int, float | None] = {}
+
+    for n_layers in range(1, max_layers + 1):
+        t0 = time.perf_counter()
+        print(f"  [{dataset_name}] depth sweep: num_layers={n_layers} …")
+        try:
+            perf, _, _ = _run_one_ablation(
+                dataset=dataset,
+                model=model,
+                pretraining=pretraining,
+                data_seed=data_seed,
+                ablation="baseline",
+                ablation_seed=ablation_seed,
+                train_cfg=train_cfg,
+                extra_cfg_overrides=[f"model.backbone.num_layers={n_layers}"],
+            )
+            performances[n_layers] = perf
+            print(
+                f"  [{dataset_name}] layers={n_layers} → {perf}  "
+                f"({time.perf_counter() - t0:.1f}s)"
+            )
+        except Exception as exc:
+            import traceback as _tb
+            print(f"  [{dataset_name}] ERROR layers={n_layers}: {exc}")
+            _tb.print_exc()
+            performances[n_layers] = None
+
+    # Pick the layer count with the best valid performance
+    valid = {
+        k: v for k, v in performances.items()
+        if v is not None and not math.isnan(v)
+    }
+    if valid:
+        best_layers: int | None = (
+            min(valid, key=valid.__getitem__)
+            if monitor_mode == "min"
+            else max(valid, key=valid.__getitem__)
+        )
+    else:
+        best_layers = None
+
+    print(
+        f"  [{dataset_name}] task_depth={best_layers}  "
+        f"(metric={monitor_metric}, mode={monitor_mode})"
+    )
+
+    return {
+        "task_depth": best_layers,
+        "task_depth_performances": {str(k): v for k, v in performances.items()},
+        "task_depth_monitor_metric": monitor_metric,
+        "task_depth_monitor_mode": monitor_mode,
+    }

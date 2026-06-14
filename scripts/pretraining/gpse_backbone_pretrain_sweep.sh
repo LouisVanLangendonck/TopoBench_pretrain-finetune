@@ -131,10 +131,11 @@ datasets=(
     # "graph/PPBR_AZ"
     # "graph/CYP2C9_Veith"
     # "graph/Clearance_Microsome_AZ"
-    "graph/DD"
-    "graph/ENZYMES"
-    "graph/COLLAB"
-    "graph/IMDB-BINARY"
+    # "graph/DD"
+    # "graph/ENZYMES"
+    # "graph/COLLAB"
+    # "graph/IMDB-BINARY"
+    "graph/Solubility_AqSolDB"
 )
 
 # --- GSPE_backbone architecture hyperparameters (shared across all methods) ---
@@ -164,7 +165,6 @@ FIXED_ARGS=(
     "model=graph/gpse_backbone"
     "model.backbone.dropout=0.0"
     "model.feature_encoder.proj_dropout=0.2"
-    "trainer.max_epochs=400"
     "trainer.min_epochs=10"
     "trainer.check_val_every_n_epoch=2"
     "callbacks.early_stopping.patience=15"
@@ -445,11 +445,13 @@ while IFS=";" read -r run_name dynamic_args_str; do
         if [[ "${arg}" == dataset=*      ]]; then dataset_val=$(basename "${arg#*=}"); fi
     done
 
-    # ── Batch size: COLLAB uses 128, all other datasets use 256 ─────────────
+    # ── Batch size / max epochs: COLLAB uses smaller values ──────────────────
     if [[ "${dataset_val}" == "COLLAB" ]]; then
-        batch_size=128
+        batch_size=8
+        max_epochs=40
     else
         batch_size=256
+        max_epochs=400
     fi
 
     # ── Per-method fixed overrides (not swept, not in run name) ──────────────
@@ -471,6 +473,7 @@ while IFS=";" read -r run_name dynamic_args_str; do
         "${FIXED_ARGS[@]}"
         "${method_fixed_args[@]}"
         "dataset.dataloader_params.batch_size=${batch_size}"
+        "trainer.max_epochs=${max_epochs}"
         "trainer.devices=[${current_gpu}]"
         "+logger.wandb.entity=${WANDB_ENTITY}"
         "logger.wandb.project=${dynamic_project}"

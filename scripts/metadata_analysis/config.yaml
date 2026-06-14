@@ -19,22 +19,23 @@
 # Mirror the list in scripts/pretraining/gin_pretrain_sweep.sh; comment out
 # any datasets you want to skip.
 datasets:
-  # - "graph/BBB_Martins"
-  # - "graph/CYP3A4_Veith"
-  # - "graph/ogbg-molhiv"
-  # # - "graph/MUTAG"
-  #- "graph/PROTEINS"
-  # # - "graph/Caco2_Wang"
-  # - "graph/Clearance_Hepatocyte_AZ"
+  - "graph/BBB_Martins"
+  - "graph/CYP3A4_Veith"
+  - "graph/ogbg-molhiv"
+  # #- "graph/MUTAG"
+  - "graph/PROTEINS"
+  - "graph/Caco2_Wang"
+  - "graph/Clearance_Hepatocyte_AZ"
   # # - "graph/ogbg-molbace"
   - "graph/IMDB-BINARY"
-  # - "graph/REDDIT-BINARY"
-  # - "graph/PPBR_AZ"
-  # - "graph/CYP2C9_Veith"
-  # - "graph/Clearance_Microsome_AZ"
+  - "graph/REDDIT-BINARY"
+  - "graph/PPBR_AZ"
+  - "graph/CYP2C9_Veith"
+  - "graph/Clearance_Microsome_AZ"
   - "graph/DD"
   - "graph/ENZYMES"
   #- "graph/COLLAB"
+  - "graph/Solubility_AqSolDB"
 
 
 # ── Model / pretraining (controls which pre_transforms are applied) ────────────
@@ -114,6 +115,10 @@ features:
 # ==============================================================================
 importance_analysis:
 
+  # ── Which analyses to run ────────────────────────────────────────────────────
+  feature_and_structural_importance: false   # 4-ablation run (baseline / rand-feat / shuffled-edges / both)
+  task_depth: true                           # layer-sweep run (1..task_depth_max_layers)
+
   # ── Model / pretraining (supervised fine-tuning, no pretraining) ────────────
   model: "graph/gpse_backbone"
   pretraining: "none"
@@ -123,7 +128,12 @@ importance_analysis:
   patience:     20
   train_seed:   42          # RNG seed for model init + optimiser
   ablation_seed: 42         # seed for RandomizeNodeFeatures / ShuffleEdges transforms
-  device: "cuda:0"             # override with "cuda:0" for GPU
+  device: "cuda:0"          # override with "cuda:0" for GPU
+
+  # ── Task-depth sweep ─────────────────────────────────────────────────────────
+  # Trains baseline (real features + real structure) with num_layers ∈ [1, max].
+  # The layer count achieving the best test score is stored as task_depth.
+  task_depth_max_layers: 8
 
   # ── Datasets where ablations are meaningless and should be skipped ────────────
   # For these datasets all ablation performances are set to null, and
@@ -136,4 +146,5 @@ importance_analysis:
   #
   # Add entries here only for datasets whose transform pipeline makes any
   # ablation fundamentally impossible or uninterpretable.
-  structural_feature_datasets: []
+  structural_feature_datasets: ["graph/DD","graph/IMDB-BINARY","graph/REDDIT-BINARY","graph/COLLAB"]
+

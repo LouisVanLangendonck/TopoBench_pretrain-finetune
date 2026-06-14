@@ -65,7 +65,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from compute_importance import compute_dataset_importance  # noqa: E402
+from compute_importance import compute_dataset_depth, compute_dataset_importance  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,15 +165,20 @@ def main(argv=None):
         or cfg.get("output_dir", str(_SCRIPT_DIR / "outputs"))
     )
 
-    model      = imp_cfg.get("model",      "graph/gpse_backbone")
-    pretraining = imp_cfg.get("pretraining", "none")
-    max_epochs  = imp_cfg.get("max_epochs",  100)
-    patience    = imp_cfg.get("patience",    20)
-    device      = args.device or imp_cfg.get("device", "cpu")
-    train_seed  = imp_cfg.get("train_seed",  42)
+    run_feat_struct = imp_cfg.get("feature_and_structural_importance", True)
+    run_task_depth  = imp_cfg.get("task_depth", False)
+
+    model         = imp_cfg.get("model",       "graph/gpse_backbone")
+    pretraining   = imp_cfg.get("pretraining", "none")
+    max_epochs    = imp_cfg.get("max_epochs",  100)
+    patience      = imp_cfg.get("patience",    20)
+    device        = args.device or imp_cfg.get("device", "cpu")
+    train_seed    = imp_cfg.get("train_seed",  42)
     ablation_seed = imp_cfg.get("ablation_seed", 42)
+    max_layers    = imp_cfg.get("task_depth_max_layers", 8)
     structural_feature_datasets = set(
-        imp_cfg.get("structural_feature_datasets", ["IMDB-BINARY", "IMDB-MULTI", "REDDIT-BINARY"])
+        ds.split("/")[-1]
+        for ds in imp_cfg.get("structural_feature_datasets", ["IMDB-BINARY", "IMDB-MULTI", "REDDIT-BINARY"])
     )
 
     train_cfg = {
@@ -187,8 +192,12 @@ def main(argv=None):
         print("ERROR: no datasets specified.", file=sys.stderr)
         sys.exit(1)
 
+    if not run_feat_struct and not run_task_depth:
+        print("WARNING: both feature_and_structural_importance and task_depth are disabled — nothing to do.", file=sys.stderr)
+        return
+
     print("=" * 60)
-    print("  Feature / Structural Importance Analysis")
+    print("  Importance Analysis")
     print("=" * 60)
     print(f"  Config    : {config_path}")
     print(f"  Model     : {model}")
@@ -198,7 +207,10 @@ def main(argv=None):
     print(f"  Device    : {device}")
     print(f"  Epochs    : {max_epochs}  patience={patience}")
     print(f"  Output    : {output_dir}")
-    print(f"  Skip ablations for: {sorted(structural_feature_datasets)}")
+    print(f"  Analyses  : feat+struct={run_feat_struct}  task_depth={run_task_depth}" +
+          (f"  (max_layers={max_layers})" if run_task_depth else ""))
+    if run_feat_struct:
+        print(f"  Skip ablations for: {sorted(structural_feature_datasets)}")
     print(f"  Datasets  : {len(datasets)}")
     for ds in datasets:
         print(f"    - {ds}")
@@ -219,27 +231,58 @@ def main(argv=None):
         print("-" * 60)
         t0 = time.perf_counter()
 
-        try:
-            result = compute_dataset_importance(
-                dataset=dataset,
-                model=model,
-                pretraining=pretraining,
-                data_seed=data_seed,
-                train_cfg=train_cfg,
-                structural_feature_datasets=structural_feature_datasets,
-                ablation_seed=ablation_seed,
-            )
-        except Exception as exc:
-            print(f"  ERROR processing {dataset}: {exc}")
-            traceback.print_exc()
-            failures.append((dataset, str(exc)))
+        result: dict = {}
+        dataset_failed = False
+
+        # ── Feature / structural importance ───────────────────────────────────
+        if run_feat_struct:
+            try:
+                r = compute_dataset_importance(
+                    dataset=dataset,
+                    model=model,
+                    pretraining=pretraining,
+                    data_seed=data_seed,
+                    train_cfg=train_cfg,
+                    structural_feature_datasets=structural_feature_datasets,
+                    ablation_seed=ablation_seed,
+                )
+                result.update(r)
+                print(
+                    f"  feat+struct → "
+                    f"feature_importance={r.get('task_feature_importance')}  "
+                    f"structural_importance={r.get('task_structural_importance')}"
+                )
+            except Exception as exc:
+                print(f"  ERROR (feat+struct) {dataset}: {exc}")
+                traceback.print_exc()
+                failures.append((dataset, f"feat+struct: {exc}"))
+                dataset_failed = True
+
+        # ── Task depth ────────────────────────────────────────────────────────
+        if run_task_depth:
+            try:
+                r = compute_dataset_depth(
+                    dataset=dataset,
+                    model=model,
+                    pretraining=pretraining,
+                    data_seed=data_seed,
+                    train_cfg=train_cfg,
+                    max_layers=max_layers,
+                    ablation_seed=ablation_seed,
+                )
+                result.update(r)
+                print(f"  task_depth  → {r.get('task_depth')}")
+            except Exception as exc:
+                print(f"  ERROR (task_depth) {dataset}: {exc}")
+                traceback.print_exc()
+                if not dataset_failed:
+                    failures.append((dataset, f"task_depth: {exc}"))
+                dataset_failed = True
+
+        if not result:
             continue
 
         print(f"  Total elapsed: {time.perf_counter() - t0:.1f}s")
-        print(
-            f"  feature_importance={result.get('task_feature_importance')}  "
-            f"structural_importance={result.get('task_structural_importance')}"
-        )
 
         # ── Merge into existing JSON ──────────────────────────────────────────
         out_path = output_dir / f"{dataset_name}.json"
@@ -260,7 +303,8 @@ def main(argv=None):
         with open(out_path, "w") as fh:
             json.dump(result, fh, indent=2)
         print(f"  {action} → {out_path}")
-        successes.append(dataset)
+        if not dataset_failed:
+            successes.append(dataset)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)

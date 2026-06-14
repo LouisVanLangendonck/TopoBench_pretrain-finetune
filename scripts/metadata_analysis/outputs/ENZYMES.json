@@ -116,5 +116,18 @@
     "best_num_layers": 6,
     "best_weight_decay": 0,
     "best_lr": 0.01
-  }
+  },
+  "task_depth": 6,
+  "task_depth_performances": {
+    "1": 0.6839227080345154,
+    "2": 0.7096281051635742,
+    "3": 0.7379612326622009,
+    "4": 0.7372097969055176,
+    "5": 0.7249250411987305,
+    "6": 0.7484016418457031,
+    "7": 0.73038649559021,
+    "8": 0.744514524936676
+  },
+  "task_depth_monitor_metric": "val/auroc",
+  "task_depth_monitor_mode": "max"
 }

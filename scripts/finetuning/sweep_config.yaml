@@ -112,26 +112,31 @@ projects:
   # - gpse_backbone_pretrain_sweep_bgrl_PPBR_AZ
   # - gpse_backbone_pretrain_sweep_bgrl_CYP2C9_Veith
   # - gpse_backbone_pretrain_sweep_bgrl_Clearance_Microsome_AZ
-  - gpse_backbone_pretrain_sweep_graphmaev2_COLLAB
-  - gpse_backbone_pretrain_sweep_graphmaev2_DD
-  - gpse_backbone_pretrain_sweep_graphmaev2_ENZYMES
-  - gpse_backbone_pretrain_sweep_graphmaev2_IMDB-BINARY
-  - gpse_backbone_pretrain_sweep_dgi_DD
-  - gpse_backbone_pretrain_sweep_dgi_ENZYMES
-  - gpse_backbone_pretrain_sweep_dgi_COLLAB
-  - gpse_backbone_pretrain_sweep_dgi_IMDB-BINARY
-  - gpse_backbone_pretrain_sweep_vgae_DD
-  - gpse_backbone_pretrain_sweep_vgae_ENZYMES
-  - gpse_backbone_pretrain_sweep_vgae_COLLAB
-  - gpse_backbone_pretrain_sweep_vgae_IMDB-BINARY
-  - gpse_backbone_pretrain_sweep_graphcl_DD
-  - gpse_backbone_pretrain_sweep_graphcl_ENZYMES
-  - gpse_backbone_pretrain_sweep_graphcl_COLLAB
-  - gpse_backbone_pretrain_sweep_graphcl_IMDB-BINARY
-  - gpse_backbone_pretrain_sweep_bgrl_DD
-  - gpse_backbone_pretrain_sweep_bgrl_ENZYMES
-  - gpse_backbone_pretrain_sweep_bgrl_COLLAB
-  - gpse_backbone_pretrain_sweep_bgrl_IMDB-BINARY
+  # - gpse_backbone_pretrain_sweep_graphmaev2_COLLAB
+  # - gpse_backbone_pretrain_sweep_graphmaev2_DD
+  # - gpse_backbone_pretrain_sweep_graphmaev2_ENZYMES
+  # - gpse_backbone_pretrain_sweep_graphmaev2_IMDB-BINARY
+  # - gpse_backbone_pretrain_sweep_dgi_DD
+  # - gpse_backbone_pretrain_sweep_dgi_ENZYMES
+  # - gpse_backbone_pretrain_sweep_dgi_COLLAB
+  # - gpse_backbone_pretrain_sweep_dgi_IMDB-BINARY
+  # - gpse_backbone_pretrain_sweep_vgae_DD
+  # - gpse_backbone_pretrain_sweep_vgae_ENZYMES
+  # - gpse_backbone_pretrain_sweep_vgae_COLLAB
+  # - gpse_backbone_pretrain_sweep_vgae_IMDB-BINARY
+  # - gpse_backbone_pretrain_sweep_graphcl_DD
+  # - gpse_backbone_pretrain_sweep_graphcl_ENZYMES
+  # - gpse_backbone_pretrain_sweep_graphcl_COLLAB
+  # - gpse_backbone_pretrain_sweep_graphcl_IMDB-BINARY
+  # - gpse_backbone_pretrain_sweep_bgrl_DD
+  # - gpse_backbone_pretrain_sweep_bgrl_ENZYMES
+  # - gpse_backbone_pretrain_sweep_bgrl_COLLAB
+  # - gpse_backbone_pretrain_sweep_bgrl_IMDB-BINARY
+  - gpse_backbone_pretrain_sweep_graphmaev2_Solubility_AqSolDB
+  - gpse_backbone_pretrain_sweep_dgi_Solubility_AqSolDB
+  - gpse_backbone_pretrain_sweep_graphcl_Solubility_AqSolDB
+  - gpse_backbone_pretrain_sweep_bgrl_Solubility_AqSolDB
+  # - gpse_backbone_pretrain_sweep_vgae_Solubility_AqSolDB
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 # Number of concurrent GPU workers.  Set to the number of available GPUs.

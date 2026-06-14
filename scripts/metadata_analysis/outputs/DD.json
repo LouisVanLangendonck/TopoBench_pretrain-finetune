@@ -97,14 +97,14 @@
     "attribute_assortativity": null
   },
   "property_shift_strength_train_test": 0.021778867926903464,
-  "gpse_backbone_baseline_performance": 0.7152542471885681,
-  "gpse_backbone_random_features_performance": 0.6338983178138733,
-  "gpse_backbone_shuffled_edges_performance": 0.701694905757904,
-  "gpse_backbone_random_features_shuffled_edges_performance": 0.6271186470985413,
-  "gpse_backbone_monitor_metric": "val/accuracy",
-  "gpse_backbone_monitor_mode": "max",
-  "task_feature_importance": 0.9230768190333205,
-  "task_structural_importance": 0.153846361933359,
+  "gpse_backbone_baseline_performance": null,
+  "gpse_backbone_random_features_performance": null,
+  "gpse_backbone_shuffled_edges_performance": null,
+  "gpse_backbone_random_features_shuffled_edges_performance": null,
+  "gpse_backbone_monitor_metric": null,
+  "gpse_backbone_monitor_mode": null,
+  "task_feature_importance": 0.0,
+  "task_structural_importance": 1.0,
   "GPSE_backbone_hyperparam_best_test": {
     "test_score": 0.7457627058029175,
     "val_score": 0.7687074542045593,
@@ -116,5 +116,18 @@
     "best_num_layers": 2,
     "best_weight_decay": 0,
     "best_lr": 0.01
-  }
+  },
+  "task_depth": 8,
+  "task_depth_performances": {
+    "1": 0.7220339179039001,
+    "2": 0.7050847411155701,
+    "3": 0.7254237532615662,
+    "4": 0.7118644118309021,
+    "5": 0.691525399684906,
+    "6": 0.7084745764732361,
+    "7": 0.6779661178588867,
+    "8": 0.7355931997299194
+  },
+  "task_depth_monitor_metric": "val/accuracy",
+  "task_depth_monitor_mode": "max"
 }

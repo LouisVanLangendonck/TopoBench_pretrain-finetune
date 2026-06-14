@@ -93,14 +93,14 @@
     "num_connected_components_mean": 2.28,
     "num_connected_components_std": 2.1339165869358623
   },
-  "gpse_backbone_baseline_performance": 0.8880000114440918,
-  "gpse_backbone_random_features_performance": 0.7739999890327454,
-  "gpse_backbone_shuffled_edges_performance": 0.7580000162124634,
-  "gpse_backbone_random_features_shuffled_edges_performance": 0.621999979019165,
-  "gpse_backbone_monitor_metric": "val/accuracy",
-  "gpse_backbone_monitor_mode": "max",
-  "task_feature_importance": 0.42857146058251205,
-  "task_structural_importance": 0.4887217270107602,
+  "gpse_backbone_baseline_performance": null,
+  "gpse_backbone_random_features_performance": null,
+  "gpse_backbone_shuffled_edges_performance": null,
+  "gpse_backbone_random_features_shuffled_edges_performance": null,
+  "gpse_backbone_monitor_metric": null,
+  "gpse_backbone_monitor_mode": null,
+  "task_feature_importance": 0.0,
+  "task_structural_importance": 1.0,
   "GPSE_backbone_hyperparam_best_test": {
     "test_score": 0.9039999842643738,
     "val_score": 0.9120000004768372,
@@ -113,5 +113,18 @@
     "best_weight_decay": 0,
     "best_lr": 0.01
   },
-  "property_shift_strength_train_test": 0.01706268293850898
+  "property_shift_strength_train_test": 0.01706268293850898,
+  "task_depth": 6,
+  "task_depth_performances": {
+    "1": 0.8920000195503235,
+    "2": 0.8980000019073486,
+    "3": 0.8980000019073486,
+    "4": 0.8920000195503235,
+    "5": 0.8960000276565552,
+    "6": 0.9020000100135803,
+    "7": 0.8899999856948853,
+    "8": 0.8960000276565552
+  },
+  "task_depth_monitor_metric": "val/accuracy",
+  "task_depth_monitor_mode": "max"
 }

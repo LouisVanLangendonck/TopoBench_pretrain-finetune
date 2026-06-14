@@ -104,5 +104,18 @@
   "gpse_backbone_monitor_metric": "val/accuracy",
   "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 1.0,
-  "task_structural_importance": 0.0
+  "task_structural_importance": 0.0,
+  "task_depth": 4,
+  "task_depth_performances": {
+    "1": 0.7491039633750916,
+    "2": 0.759856641292572,
+    "3": 0.759856641292572,
+    "4": 0.7706093192100525,
+    "5": 0.7526881694793701,
+    "6": 0.7491039633750916,
+    "7": 0.7275985479354858,
+    "8": 0.7491039633750916
+  },
+  "task_depth_monitor_metric": "val/accuracy",
+  "task_depth_monitor_mode": "max"
 }

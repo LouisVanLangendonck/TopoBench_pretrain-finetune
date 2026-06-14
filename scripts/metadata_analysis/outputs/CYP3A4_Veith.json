@@ -113,5 +113,18 @@
     "best_weight_decay": 0,
     "best_lr": 0.01
   },
-  "property_shift_strength_train_test": 0.004141615471465138
+  "property_shift_strength_train_test": 0.004141615471465138,
+  "task_depth": 5,
+  "task_depth_performances": {
+    "1": 0.7619627118110657,
+    "2": 0.7643957734107971,
+    "3": 0.7603406310081482,
+    "4": 0.7656123042106628,
+    "5": 0.7757502198219299,
+    "6": 0.7733170986175537,
+    "7": 0.7660178542137146,
+    "8": 0.757096529006958
+  },
+  "task_depth_monitor_metric": "val/accuracy",
+  "task_depth_monitor_mode": "max"
 }

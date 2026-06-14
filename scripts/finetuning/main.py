@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
         description="Few-shot fine-tuning of a pretrained TopoBench model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--project",  default="gpse_backbone_pretrain_sweep_bgrl_BBB_Martins")
+    p.add_argument("--project",  default="gpse_backbone_pretrain_sweep_graphmaev2_COLLAB")
     p.add_argument("--entity",   default="louis-van-langendonck-universitat-polit-cnica-de-catalunya")
     p.add_argument("--run-id",   default=None, dest="run_id",
                    help="W&B run ID. Omit to use the first run in the project.")

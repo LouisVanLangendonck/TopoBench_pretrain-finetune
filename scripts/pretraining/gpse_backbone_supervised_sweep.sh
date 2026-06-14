@@ -124,15 +124,15 @@ datasets=(
     # "graph/Clearance_Hepatocyte_AZ"
     # "graph/ogbg-molbace"
     # "graph/ogbg-molhiv"
-    "graph/IMDB-BINARY"
+    # "graph/IMDB-BINARY"
     # "graph/REDDIT-BINARY"
     # "graph/Caco2_Wang"
     # "graph/NCI1"
     # graph/PPBR_AZ
     # graph/CYP2C9_Veith
     # graph/Clearance_Microsome_AZ
-    - "graph/DD"
-    - "graph/ENZYMES"
+    # - "graph/DD"
+    # - "graph/ENZYMES"
     - "graph/COLLAB"
 )
 
