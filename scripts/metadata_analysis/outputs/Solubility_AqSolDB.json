@@ -117,5 +117,17 @@
     "8": 0.8329962491989136
   },
   "task_depth_monitor_metric": "val/mae",
-  "task_depth_monitor_mode": "min"
+  "task_depth_monitor_mode": "min",
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.8101640939712524,
+    "val_score": 0.7454460859298706,
+    "monitor_metric": "mae",
+    "higher_better": false,
+    "best_run_id": "9ggow9gq",
+    "best_run_name": "autumn-microwave-633",
+    "best_hidden_channels": 256,
+    "best_num_layers": 6,
+    "best_weight_decay": 0,
+    "best_lr": 0.001
+  }
 }

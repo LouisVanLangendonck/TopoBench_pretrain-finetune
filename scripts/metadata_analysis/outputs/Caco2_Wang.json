@@ -11,5 +11,17 @@
     "8": 0.48178303241729736
   },
   "task_depth_monitor_metric": "val/mae",
-  "task_depth_monitor_mode": "min"
+  "task_depth_monitor_mode": "min",
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.4075519740581513,
+    "val_score": 0.412455677986145,
+    "monitor_metric": "mae",
+    "higher_better": false,
+    "best_run_id": "w1whl94l",
+    "best_run_name": "firm-breeze-278",
+    "best_hidden_channels": 512,
+    "best_num_layers": 2,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
 }

@@ -133,7 +133,8 @@ datasets=(
     # graph/Clearance_Microsome_AZ
     # - "graph/DD"
     # - "graph/ENZYMES"
-    - "graph/COLLAB"
+    #- "graph/COLLAB"
+    - "graph/Solubility_AqSolDB"
 )
 
 # --- GPSE backbone architecture hyperparameters ---

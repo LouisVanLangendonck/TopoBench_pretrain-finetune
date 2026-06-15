@@ -104,5 +104,17 @@
   "gpse_backbone_monitor_metric": null,
   "gpse_backbone_monitor_mode": null,
   "task_feature_importance": 0.0,
-  "task_structural_importance": 1.0
+  "task_structural_importance": 1.0,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.7311999797821045,
+    "val_score": 0.769599974155426,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "vk7tdczw",
+    "best_run_name": "vital-durian-541",
+    "best_hidden_channels": 128,
+    "best_num_layers": 2,
+    "best_weight_decay": 0.001,
+    "best_lr": 0.01
+  }
 }
