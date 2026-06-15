@@ -1,0 +1,16 @@
+{
+  "dataset": "graph/NCI1",
+  "data_seed": 0,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.7607004046440125,
+    "val_score": 0.7643622159957886,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "z6f0vap2",
+    "best_run_name": "proud-puddle-310",
+    "best_hidden_channels": 256,
+    "best_num_layers": 6,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
+}

@@ -117,5 +117,17 @@
     "8": 0.7491039633750916
   },
   "task_depth_monitor_metric": "val/accuracy",
-  "task_depth_monitor_mode": "max"
+  "task_depth_monitor_mode": "max",
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.7491039633750916,
+    "val_score": 0.7553957104682922,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "437k6hii",
+    "best_run_name": "flowing-sea-655",
+    "best_hidden_channels": 128,
+    "best_num_layers": 4,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
 }

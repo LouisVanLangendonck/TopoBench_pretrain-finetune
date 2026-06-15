@@ -124,8 +124,8 @@ for i in "${!gpus[@]}"; do slot_pids[$i]=0; done
 datasets=(
     # "graph/BBB_Martins"
     # "graph/CYP3A4_Veith"
-    "graph/PROTEINS"
-    "graph/Caco2_Wang"
+    # "graph/PROTEINS"
+    # "graph/Caco2_Wang"
     # "graph/Clearance_Hepatocyte_AZ"
     # "graph/ogbg-molhiv"
     # "graph/REDDIT-BINARY"

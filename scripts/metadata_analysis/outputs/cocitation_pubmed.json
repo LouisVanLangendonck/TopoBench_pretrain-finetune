@@ -1,0 +1,16 @@
+{
+  "dataset": "graph/cocitation_pubmed",
+  "data_seed": 0,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.8957403898239136,
+    "val_score": 0.8989652991294861,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "acqjr8rf",
+    "best_run_name": "electric-frog-55",
+    "best_hidden_channels": 256,
+    "best_num_layers": 4,
+    "best_weight_decay": 0.001,
+    "best_lr": 0.001
+  }
+}

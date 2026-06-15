@@ -1,10 +1,11 @@
 #!/bin/bash
 # ==============================================================================
-# SCRIPT: gpse_backbone_supervised_sweep.sh
+# SCRIPT: gpse_backbone_supervised_sweep_transductive.sh
 # DESCRIPTION:
 #   Supervised (pretraining=none) hyperparameter sweep for the GPSE backbone
-#   on inductive graph datasets.  Serves as a fully-trained baseline to compare
-#   against the pretrained variants from gpse_backbone_pretrain_sweep.sh.
+#   on transductive node-classification datasets.  Serves as a fully-trained
+#   baseline to compare against the pretrained variants from
+#   gpse_backbone_pretrain_sweep_transductive.sh.
 #
 #   Swept parameters:
 #     hidden_channels : 128, 256, 512   (model.feature_encoder.out_channels)
@@ -12,8 +13,8 @@
 #     weight_decay    : 0, 0.001        (optimizer.parameters.weight_decay)
 #     lr              : 0.001, 0.01     (optimizer.parameters.lr)
 #
-# ESTIMATED RUNS (10 datasets × 3 hidden × 3 layers × 2 wd × 2 lr × 1 seed):
-#   10 × 3 × 3 × 2 × 2 = 360 total runs
+# ESTIMATED RUNS (4 datasets × 3 hidden × 3 layers × 2 wd × 2 lr × 1 seed):
+#   4 × 3 × 3 × 2 × 2 = 144 total runs
 #
 # CONCURRENCY: Uses "Virtual Slots" — N parallel jobs per GPU.
 # All runs log to a single W&B project named after this script.
@@ -118,23 +119,10 @@ for i in "${!gpus[@]}"; do slot_pids[$i]=0; done
 
 # --- Datasets ---
 datasets=(
-    # "graph/BBB_Martins"
-    # "graph/CYP3A4_Veith"
-    "graph/PROTEINS"
-    # "graph/Clearance_Hepatocyte_AZ"
-    # "graph/ogbg-molbace"
-    # "graph/ogbg-molhiv"
-    # "graph/IMDB-BINARY"
-    # "graph/REDDIT-BINARY"
-    # "graph/Caco2_Wang"
-    # "graph/NCI1"
-    # graph/PPBR_AZ
-    # graph/CYP2C9_Veith
-    # graph/Clearance_Microsome_AZ
-    # - "graph/DD"
-    # - "graph/ENZYMES"
-    #- "graph/COLLAB"
-    #- "graph/Solubility_AqSolDB"
+    "graph/cocitation_cora"
+    "graph/cocitation_pubmed"
+    "graph/minesweeper"
+    "graph/roman_empire"
 )
 
 # --- GPSE backbone architecture hyperparameters ---
@@ -153,7 +141,6 @@ FIXED_ARGS=(
     "model=graph/gpse_backbone"
     "model.backbone.dropout=0.0"
     "model.feature_encoder.proj_dropout=0.2"
-    "dataset.dataloader_params.batch_size=128"
     "trainer.max_epochs=400"
     "trainer.min_epochs=10"
     "trainer.check_val_every_n_epoch=2"
@@ -236,8 +223,8 @@ tmp_combos=$(mktemp)
 total_runs=0
 
 # pretraining=none is the first dimension — mirrors how pretraining=<method>
-# is the first dimension in gpse_backbone_pretrain_sweep.sh, ensuring it is
-# always the first CLI override passed to topobench.
+# is the first dimension in gpse_backbone_pretrain_sweep_transductive.sh,
+# ensuring it is always the first CLI override passed to topobench.
 sweep_dims=(
     "|pretraining|none"
     "|dataset|${datasets[*]}"

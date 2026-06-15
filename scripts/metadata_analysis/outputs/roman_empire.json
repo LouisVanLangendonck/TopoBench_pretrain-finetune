@@ -1,0 +1,16 @@
+{
+  "dataset": "graph/roman_empire",
+  "data_seed": 0,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.8937522172927856,
+    "val_score": 0.8983230590820312,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "5vz11rfe",
+    "best_run_name": "glorious-sky-117",
+    "best_hidden_channels": 128,
+    "best_num_layers": 6,
+    "best_weight_decay": 0,
+    "best_lr": 0.01
+  }
+}

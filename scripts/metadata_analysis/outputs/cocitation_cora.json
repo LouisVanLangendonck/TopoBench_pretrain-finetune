@@ -1,0 +1,16 @@
+{
+  "dataset": "graph/cocitation_cora",
+  "data_seed": 0,
+  "GPSE_backbone_hyperparam_best_test": {
+    "test_score": 0.8847858309745789,
+    "val_score": 0.8537666201591492,
+    "monitor_metric": "accuracy",
+    "higher_better": true,
+    "best_run_id": "m8tbj9c1",
+    "best_run_name": "colorful-cosmos-26",
+    "best_hidden_channels": 512,
+    "best_num_layers": 2,
+    "best_weight_decay": 0,
+    "best_lr": 0.001
+  }
+}
