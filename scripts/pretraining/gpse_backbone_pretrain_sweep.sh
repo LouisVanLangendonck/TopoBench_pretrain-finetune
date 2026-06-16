@@ -137,6 +137,7 @@ datasets=(
     # "graph/COLLAB"
     # "graph/IMDB-BINARY"
     # "graph/Solubility_AqSolDB"
+    "graph/deezer_ego_nets"
 )
 
 # --- GSPE_backbone architecture hyperparameters (shared across all methods) ---
