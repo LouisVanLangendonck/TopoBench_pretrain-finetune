@@ -93,7 +93,7 @@
     "num_connected_components_mean": 1.0985221674876848,
     "num_connected_components_std": 0.455018846847507
   },
-  "gpse_backbone_baseline_performance": 0.8744592666625977,
+  "gpse_backbone_baseline_performance": 0.8687237501144409,
   "gpse_backbone_random_features_performance": 0.6822711229324341,
   "gpse_backbone_shuffled_edges_performance": 0.7749688625335693,
   "gpse_backbone_random_features_shuffled_edges_performance": 0.5514755845069885,
@@ -126,5 +126,14 @@
     "8": 0.8647985458374023
   },
   "task_depth_monitor_metric": "val/auroc",
-  "task_depth_monitor_mode": "max"
+  "task_depth_monitor_mode": "max",
+  "gpse_backbone_no_edges_performance": 0.8213576078414917,
+  "gpse_backbone_sub_edges_performance": 0.783011257648468,
+  "gpse_backbone_equal_feat_performance": 0.7502323389053345,
+  "task_feature_importance_new": 0.9069456893629485,
+  "task_structural_importance_new": 0.23459568519159893,
+  "gpse_backbone_no_edge_no_feat_performance": 0.35273477435112,
+  "gpse_backbone_no_edge_all_feat_performance": 0.8207087516784668,
+  "gpse_backbone_all_edge_no_feat_performance": 0.7846134305000305,
+  "gpse_backbone_sub_edge_no_feat_performance": 0.6832965612411499
 }

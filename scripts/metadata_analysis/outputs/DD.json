@@ -97,12 +97,12 @@
     "attribute_assortativity": null
   },
   "property_shift_strength_train_test": 0.021778867926903464,
-  "gpse_backbone_baseline_performance": null,
+  "gpse_backbone_baseline_performance": 0.7457627058029175,
   "gpse_backbone_random_features_performance": null,
   "gpse_backbone_shuffled_edges_performance": null,
   "gpse_backbone_random_features_shuffled_edges_performance": null,
-  "gpse_backbone_monitor_metric": null,
-  "gpse_backbone_monitor_mode": null,
+  "gpse_backbone_monitor_metric": "val/accuracy",
+  "gpse_backbone_monitor_mode": "max",
   "task_feature_importance": 0.0,
   "task_structural_importance": 1.0,
   "GPSE_backbone_hyperparam_best_test": {
@@ -129,5 +129,11 @@
     "8": 0.7355931997299194
   },
   "task_depth_monitor_metric": "val/accuracy",
-  "task_depth_monitor_mode": "max"
+  "task_depth_monitor_mode": "max",
+  "gpse_backbone_no_edge_no_feat_performance": 0.5389830470085144,
+  "gpse_backbone_no_edge_all_feat_performance": 0.5389830470085144,
+  "gpse_backbone_all_edge_no_feat_performance": 0.7593220472335815,
+  "gpse_backbone_sub_edge_no_feat_performance": 0.7152542471885681,
+  "task_feature_importance_new": 0.0,
+  "task_structural_importance_new": 0.2
 }

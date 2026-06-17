@@ -122,12 +122,18 @@
     "attribute_assortativity": -0.1461914161484243
   },
   "property_shift_strength_train_test": 0.06214994276169901,
-  "gpse_backbone_baseline_performance": 0.4378088712692261,
+  "gpse_backbone_baseline_performance": 0.4075519740581513,
   "gpse_backbone_random_features_performance": 0.6702631711959839,
   "gpse_backbone_shuffled_edges_performance": 0.5960503220558167,
   "gpse_backbone_random_features_shuffled_edges_performance": 0.9751786589622498,
   "gpse_backbone_monitor_metric": "val/mae",
   "gpse_backbone_monitor_mode": "min",
   "task_feature_importance": 0.43257791050126726,
-  "task_structural_importance": 0.29447403707963415
+  "task_structural_importance": 0.29447403707963415,
+  "gpse_backbone_no_edge_no_feat_performance": 0.6479554772377014,
+  "gpse_backbone_no_edge_all_feat_performance": 1.1699632406234741,
+  "gpse_backbone_all_edge_no_feat_performance": 0.6362733244895935,
+  "gpse_backbone_sub_edge_no_feat_performance": 0.7760419845581055,
+  "task_feature_importance_new": 0.0,
+  "task_structural_importance_new": 1.0
 }

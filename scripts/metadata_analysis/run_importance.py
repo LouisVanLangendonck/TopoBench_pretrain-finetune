@@ -9,6 +9,9 @@ training experiments with a fresh ``gpse_backbone``:
   3. Shuffled edges    – real features, randomly rewired graph
   4. Both              – Gaussian features + randomly rewired graph (pure noise)
 
+A second, more robust definition (``*_new`` scores) is also available; see
+``feature_and_structural_importance_new`` in the config.
+
 The test-set performance for each run (using the dataset's own monitor metric)
 is saved to the JSON output file.  Feature and structural importance scores
 are then computed as:
@@ -65,7 +68,13 @@ if str(_PROJECT_ROOT) not in sys.path:
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from compute_importance import compute_dataset_depth, compute_dataset_importance  # noqa: E402
+from compute_importance import (
+    compute_dataset_depth,
+    compute_dataset_importance,
+    compute_dataset_importance_new,
+    hyperparam_overrides_from_json,
+    load_best_hyperparams,
+)  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +175,7 @@ def main(argv=None):
     )
 
     run_feat_struct = imp_cfg.get("feature_and_structural_importance", True)
+    run_feat_struct_new = imp_cfg.get("feature_and_structural_importance_new", True)
     run_task_depth  = imp_cfg.get("task_depth", False)
 
     model         = imp_cfg.get("model",       "graph/gpse_backbone")
@@ -176,6 +186,10 @@ def main(argv=None):
     train_seed    = imp_cfg.get("train_seed",  42)
     ablation_seed = imp_cfg.get("ablation_seed", 42)
     max_layers    = imp_cfg.get("task_depth_max_layers", 8)
+    sub_edges_frac = imp_cfg.get("sub_edges_frac", 0.75)
+    equal_gaus_mean = imp_cfg.get("equal_gaus_mean", 0.0)
+    equal_gaus_std  = imp_cfg.get("equal_gaus_std", 0.1)
+    use_best_hyperparams = imp_cfg.get("use_best_hyperparams", True)
     structural_feature_datasets = set(
         ds.split("/")[-1]
         for ds in imp_cfg.get("structural_feature_datasets", ["IMDB-BINARY", "IMDB-MULTI", "REDDIT-BINARY"])
@@ -192,8 +206,8 @@ def main(argv=None):
         print("ERROR: no datasets specified.", file=sys.stderr)
         sys.exit(1)
 
-    if not run_feat_struct and not run_task_depth:
-        print("WARNING: both feature_and_structural_importance and task_depth are disabled — nothing to do.", file=sys.stderr)
+    if not run_feat_struct and not run_feat_struct_new and not run_task_depth:
+        print("WARNING: feature_and_structural_importance, feature_and_structural_importance_new, and task_depth are all disabled — nothing to do.", file=sys.stderr)
         return
 
     print("=" * 60)
@@ -207,13 +221,27 @@ def main(argv=None):
     print(f"  Device    : {device}")
     print(f"  Epochs    : {max_epochs}  patience={patience}")
     print(f"  Output    : {output_dir}")
-    print(f"  Analyses  : feat+struct={run_feat_struct}  task_depth={run_task_depth}" +
+    print(f"  Analyses  : feat+struct={run_feat_struct}  feat+struct_new={run_feat_struct_new}  task_depth={run_task_depth}" +
           (f"  (max_layers={max_layers})" if run_task_depth else ""))
+    if run_feat_struct_new:
+        print(f"  New metric: sub_edges_frac={sub_edges_frac}  equal_gaus=({equal_gaus_mean}, {equal_gaus_std})")
+    print(f"  Tuned HP  : {use_best_hyperparams} (from {output_dir}/<dataset>.json)")
     if run_feat_struct:
         print(f"  Skip ablations for: {sorted(structural_feature_datasets)}")
     print(f"  Datasets  : {len(datasets)}")
     for ds in datasets:
-        print(f"    - {ds}")
+        ds_name = ds.split("/")[-1]
+        hp_note = ""
+        if use_best_hyperparams:
+            hp = load_best_hyperparams(output_dir, ds_name)
+            if hp:
+                hp_note = (
+                    f"  [hp: h={hp.get('best_hidden_channels')}, "
+                    f"L={hp.get('best_num_layers')}, "
+                    f"wd={hp.get('best_weight_decay')}, "
+                    f"lr={hp.get('best_lr')}]"
+                )
+        print(f"    - {ds}{hp_note}")
     print("=" * 60)
 
     if args.dry_run:
@@ -234,7 +262,22 @@ def main(argv=None):
         result: dict = {}
         dataset_failed = False
 
-        # ── Feature / structural importance ───────────────────────────────────
+        dataset_train_cfg = dict(train_cfg)
+        if use_best_hyperparams:
+            hp = load_best_hyperparams(output_dir, dataset_name)
+            if hp:
+                dataset_train_cfg["hyperparam_overrides"] = (
+                    hyperparam_overrides_from_json(hp)
+                )
+                print(
+                    f"  Tuned hyperparams: "
+                    f"hidden={hp.get('best_hidden_channels')}  "
+                    f"layers={hp.get('best_num_layers')}  "
+                    f"wd={hp.get('best_weight_decay')}  "
+                    f"lr={hp.get('best_lr')}"
+                )
+
+        # ── Feature / structural importance (original) ────────────────────────
         if run_feat_struct:
             try:
                 r = compute_dataset_importance(
@@ -242,7 +285,7 @@ def main(argv=None):
                     model=model,
                     pretraining=pretraining,
                     data_seed=data_seed,
-                    train_cfg=train_cfg,
+                    train_cfg=dataset_train_cfg,
                     structural_feature_datasets=structural_feature_datasets,
                     ablation_seed=ablation_seed,
                 )
@@ -258,6 +301,34 @@ def main(argv=None):
                 failures.append((dataset, f"feat+struct: {exc}"))
                 dataset_failed = True
 
+        # ── Feature / structural importance (new, robust definition) ──────────
+        if run_feat_struct_new:
+            try:
+                r = compute_dataset_importance_new(
+                    dataset=dataset,
+                    model=model,
+                    pretraining=pretraining,
+                    data_seed=data_seed,
+                    train_cfg=dataset_train_cfg,
+                    ablation_seed=ablation_seed,
+                    sub_edges_frac=sub_edges_frac,
+                    equal_gaus_mean=equal_gaus_mean,
+                    equal_gaus_std=equal_gaus_std,
+                    output_dir=output_dir,
+                    use_best_test_baseline=use_best_hyperparams,
+                )
+                result.update(r)
+                print(
+                    f"  feat+struct_new → "
+                    f"feature_importance_new={r.get('task_feature_importance_new')}  "
+                    f"structural_importance_new={r.get('task_structural_importance_new')}"
+                )
+            except Exception as exc:
+                print(f"  ERROR (feat+struct_new) {dataset}: {exc}")
+                traceback.print_exc()
+                failures.append((dataset, f"feat+struct_new: {exc}"))
+                dataset_failed = True
+
         # ── Task depth ────────────────────────────────────────────────────────
         if run_task_depth:
             try:
@@ -266,7 +337,7 @@ def main(argv=None):
                     model=model,
                     pretraining=pretraining,
                     data_seed=data_seed,
-                    train_cfg=train_cfg,
+                    train_cfg=dataset_train_cfg,
                     max_layers=max_layers,
                     ablation_seed=ablation_seed,
                 )

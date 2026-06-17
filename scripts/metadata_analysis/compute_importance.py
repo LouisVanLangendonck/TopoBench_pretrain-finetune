@@ -51,6 +51,26 @@ ablation performances are set to ``null`` and importances to
 ``feature_importance=0, structural_importance=1`` without running any
 experiments.  By default this list is empty — IMDB/REDDIT are now handled
 via the injection-before-CombinedPSEs approach above.
+
+New robust definition (``*_new`` scores)
+----------------------------------------
+Five ablations for **all** datasets (ignoring ``structural_feature_datasets``):
+
+    baseline           – all edges, all features (real)
+    no_edge_no_feat    – no edges, equal Gaussian features  (absolute zero)
+    no_edge_all_feat   – no edges, real features
+    all_edge_no_feat   – all edges, equal Gaussian features (structural ceiling)
+    sub_edge_no_feat   – 75 % edges, equal Gaussian features
+
+    feature_importance_new    = (P_no_edge_all_feat − P_no_edge_no_feat)
+                                / (P_all_edge_all_feat − P_no_edge_no_feat)
+    structural_importance_new = (P_all_edge_no_feat − P_sub_edge_no_feat)
+                                / (P_all_edge_no_feat − P_no_edge_no_feat)
+
+Both formulas flip numerator/denominator signs for lower-is-better metrics.
+
+Edge ablations that neutralise features always pair with equal Gaussian
+(``EqualGausFeatures`` or ``EqualGausNodeEdgeFeatures``).
 """
 
 from __future__ import annotations
@@ -59,6 +79,7 @@ import math
 import sys
 import tempfile
 import time
+import json
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +106,162 @@ PERF_KEYS = {
     "shuffled_edges":   "gpse_backbone_shuffled_edges_performance",
     "both":             "gpse_backbone_random_features_shuffled_edges_performance",
 }
+
+# ── New (robust) importance definition ───────────────────────────────────────
+NEW_ABLATION_TYPES = [
+    "baseline",
+    "no_edge_no_feat",
+    "no_edge_all_feat",
+    "all_edge_no_feat",
+    "sub_edge_no_feat",
+]
+
+NEW_PERF_KEYS = {
+    "baseline":          "gpse_backbone_baseline_performance",
+    "no_edge_no_feat":   "gpse_backbone_no_edge_no_feat_performance",
+    "no_edge_all_feat":  "gpse_backbone_no_edge_all_feat_performance",
+    "all_edge_no_feat":  "gpse_backbone_all_edge_no_feat_performance",
+    "sub_edge_no_feat":  "gpse_backbone_sub_edge_no_feat_performance",
+}
+
+_BEST_HP_JSON_KEY = "GPSE_backbone_hyperparam_best_test"
+
+
+def load_dataset_json(output_dir: Path, dataset_name: str) -> dict:
+    """Load the full metadata JSON for a dataset, or ``{}`` if missing."""
+    json_path = output_dir / f"{dataset_name}.json"
+    if not json_path.exists():
+        return {}
+    try:
+        with open(json_path) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def load_best_hyperparams(output_dir: Path, dataset_name: str) -> dict | None:
+    """Return the tuned-hyperparam block from a dataset JSON, if present."""
+    hp = load_dataset_json(output_dir, dataset_name).get(_BEST_HP_JSON_KEY)
+    return hp if isinstance(hp, dict) else None
+
+
+def best_test_baseline_performance(output_dir: Path, dataset_name: str) -> float | None:
+    """Return ``GPSE_backbone_hyperparam_best_test.test_score`` when available."""
+    hp = load_best_hyperparams(output_dir, dataset_name)
+    if hp is None:
+        return None
+    score = hp.get("test_score")
+    if score is None or (isinstance(score, float) and math.isnan(score)):
+        return None
+    return float(score)
+
+
+def hyperparam_overrides_from_json(hp: dict) -> list[str]:
+    """Build Hydra overrides from a ``GPSE_backbone_hyperparam_best_test`` entry."""
+    mapping = (
+        ("best_hidden_channels", "++model.feature_encoder.out_channels"),
+        ("best_num_layers", "++model.backbone.num_layers"),
+        ("best_weight_decay", "++optimizer.parameters.weight_decay"),
+        ("best_lr", "++optimizer.parameters.lr"),
+    )
+    overrides: list[str] = []
+    for json_key, hydra_key in mapping:
+        val = hp.get(json_key)
+        if val is not None:
+            overrides.append(f"{hydra_key}={val}")
+    return overrides
+
+
+def _first_sample_graph(raw_dataset) -> Any:
+    """Return the first graph from a raw dataset."""
+    if hasattr(raw_dataset, "__getitem__"):
+        return raw_dataset[0]
+    return next(iter(raw_dataset))
+
+
+def _pipeline_uses_equal_gaus(cfg: DictConfig) -> bool:
+    """True when the dataset pipeline already assigns ``EqualGausFeatures``."""
+    transforms = cfg.get("transforms")
+    if transforms is None:
+        return False
+
+    container = OmegaConf.to_container(transforms, resolve=True)
+    if not isinstance(container, dict):
+        return False
+
+    for key, val in container.items():
+        if "equal_gaus" in str(key).lower():
+            return True
+        if isinstance(val, dict) and val.get("transform_name") == "EqualGausFeatures":
+            return True
+    return False
+
+
+def _dataset_has_semantic_features(cfg: DictConfig, sample: Any) -> bool:
+    """True when the dataset carries informative node/edge features to neutralise."""
+    if _pipeline_uses_equal_gaus(cfg):
+        return False
+
+    from omegaconf import ListConfig
+
+    nf = cfg.dataset.parameters.get("num_features")
+    if isinstance(nf, (list, ListConfig)):
+        return True
+    if sample is None:
+        return False
+    x = getattr(sample, "x", None)
+    return x is not None and x.numel() > 0
+
+
+def _resolve_equal_gaus_params(
+    cfg: DictConfig, raw_dataset
+) -> tuple[int, int | None, bool]:
+    """Resolve equal-Gaussian dims and which transform to use.
+
+    Returns
+    -------
+    (num_node_features, num_edge_features_or_None, use_node_edge_transform)
+
+    Datasets **without** semantic features (DD, IMDB, …) keep the original
+    ``EqualGausFeatures`` transform.  Datasets **with** real ``x`` / ``edge_attr``
+    use ``EqualGausNodeEdgeFeatures`` so both are neutralised.
+    """
+    from omegaconf import ListConfig
+
+    sample = _first_sample_graph(raw_dataset)
+    nf = cfg.dataset.parameters.get("num_features")
+
+    if _dataset_has_semantic_features(cfg, sample):
+        if isinstance(nf, (list, ListConfig)):
+            node_dim = int(nf[0])
+            edge_dim = int(nf[1]) if len(nf) > 1 else None
+        elif nf is not None:
+            node_dim = int(nf)
+            edge_dim = None
+        else:
+            x = sample.x
+            node_dim = int(x.shape[1]) if x.dim() > 1 else 1
+
+        if edge_dim is None:
+            edge_attr = getattr(sample, "edge_attr", None)
+            if edge_attr is not None and edge_attr.numel() > 0:
+                edge_dim = (
+                    int(edge_attr.shape[-1])
+                    if edge_attr.dim() > 1
+                    else 1
+                )
+
+        return node_dim, edge_dim, True
+
+    if isinstance(nf, (list, ListConfig)):
+        node_dim = int(nf[0])
+    elif nf is not None:
+        node_dim = int(nf)
+    else:
+        node_dim = 10
+
+    return node_dim, None, False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +388,126 @@ def _build_ablation_transforms_config(
     return OmegaConf.create(result_dict)
 
 
+    return OmegaConf.create(result_dict)
+
+
+def _equal_gaus_ablation_entry(
+    num_features: int,
+    num_edge_features: int | None,
+    use_node_edge_equal_gaus: bool,
+    equal_gaus_mean: float,
+    equal_gaus_std: float,
+    key_suffix: str = "",
+) -> tuple[str, dict]:
+    """Build a single equal-Gaussian ablation transform entry."""
+    if use_node_edge_equal_gaus:
+        key = f"EqualGausNodeEdgeFeatures_ablation{key_suffix}"
+        entry: dict = {
+            "transform_name": "EqualGausNodeEdgeFeatures",
+            "mean": equal_gaus_mean,
+            "std": equal_gaus_std,
+            "num_features": num_features,
+        }
+        if num_edge_features is not None:
+            entry["num_edge_features"] = num_edge_features
+    else:
+        key = f"EqualGausFeatures_ablation{key_suffix}"
+        entry = {
+            "transform_name": "EqualGausFeatures",
+            "mean": equal_gaus_mean,
+            "std": equal_gaus_std,
+            "num_features": num_features,
+        }
+    return key, entry
+
+
+def _build_new_ablation_transforms_config(
+    base_transforms_cfg: DictConfig | None,
+    ablation: str,
+    ablation_seed: int = 42,
+    sub_edges_frac: float = 0.75,
+    num_features: int | None = None,
+    num_edge_features: int | None = None,
+    use_node_edge_equal_gaus: bool = False,
+    equal_gaus_mean: float = 0.0,
+    equal_gaus_std: float = 0.1,
+) -> DictConfig | None:
+    """Inject new-definition ablation transforms immediately before ``CombinedPSEs``.
+
+    Ablation types
+    --------------
+    baseline           – no modification
+    no_edge_no_feat    – no edges + equal Gaussian features (absolute zero)
+    no_edge_all_feat   – no edges + real features
+    all_edge_no_feat   – full graph + equal Gaussian features
+    sub_edge_no_feat   – subsampled edges + equal Gaussian features
+    """
+    if ablation == "baseline":
+        return base_transforms_cfg
+
+    if num_features is None and ablation != "no_edge_all_feat":
+        raise ValueError(
+            f"num_features is required for the {ablation} ablation"
+        )
+
+    ablation_entries: dict[str, dict] = {}
+
+    if ablation == "no_edge_all_feat":
+        ablation_entries["RemoveEdges_ablation"] = {
+            "transform_name": "RemoveEdges",
+        }
+    elif ablation == "no_edge_no_feat":
+        ablation_entries["RemoveEdges_ablation"] = {
+            "transform_name": "RemoveEdges",
+        }
+        gaus_key, gaus_entry = _equal_gaus_ablation_entry(
+            num_features, num_edge_features, use_node_edge_equal_gaus,
+            equal_gaus_mean, equal_gaus_std,
+        )
+        ablation_entries[gaus_key] = gaus_entry
+    elif ablation == "all_edge_no_feat":
+        gaus_key, gaus_entry = _equal_gaus_ablation_entry(
+            num_features, num_edge_features, use_node_edge_equal_gaus,
+            equal_gaus_mean, equal_gaus_std,
+        )
+        ablation_entries[gaus_key] = gaus_entry
+    elif ablation == "sub_edge_no_feat":
+        ablation_entries["SubsampleEdges_ablation"] = {
+            "transform_name": "SubsampleEdges",
+            "frac": sub_edges_frac,
+            "seed": ablation_seed,
+        }
+        gaus_key, gaus_entry = _equal_gaus_ablation_entry(
+            num_features, num_edge_features, use_node_edge_equal_gaus,
+            equal_gaus_mean, equal_gaus_std,
+        )
+        ablation_entries[gaus_key] = gaus_entry
+    else:
+        raise ValueError(f"Unknown new ablation type: {ablation!r}")
+
+    if base_transforms_cfg is not None:
+        base_dict: dict = OmegaConf.to_container(base_transforms_cfg, resolve=True)
+    else:
+        base_dict = {}
+
+    combined_pses_key: str | None = None
+    for key in base_dict:
+        if key == "CombinedPSEs" or "CombinedPSEs" in str(key):
+            combined_pses_key = key
+            break
+
+    if combined_pses_key is None:
+        result_dict = {**ablation_entries, **base_dict}
+    else:
+        result_dict = {}
+        for key, val in base_dict.items():
+            if key == combined_pses_key:
+                result_dict.update(ablation_entries)
+            result_dict[key] = val
+
+    return OmegaConf.create(result_dict)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Datamodule construction
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,6 +516,11 @@ def _build_ablation_datamodule(
     cfg: DictConfig,
     ablation: str,
     ablation_seed: int = 42,
+    *,
+    ablation_family: str = "legacy",
+    sub_edges_frac: float = 0.75,
+    equal_gaus_mean: float = 0.0,
+    equal_gaus_std: float = 0.1,
 ) -> Any:
     """Build a TBDataloader with optional ablation pre-transforms.
 
@@ -239,9 +541,25 @@ def _build_ablation_datamodule(
     loader = hydra.utils.instantiate(cfg.dataset.loader)
     raw_dataset, dataset_dir = loader.load()
 
-    transforms_cfg = _build_ablation_transforms_config(
-        cfg.get("transforms"), ablation, ablation_seed
-    )
+    if ablation_family == "new":
+        num_features, num_edge_features, use_node_edge_equal_gaus = (
+            _resolve_equal_gaus_params(cfg, raw_dataset)
+        )
+        transforms_cfg = _build_new_ablation_transforms_config(
+            cfg.get("transforms"),
+            ablation,
+            ablation_seed,
+            sub_edges_frac=sub_edges_frac,
+            num_features=num_features,
+            num_edge_features=num_edge_features,
+            use_node_edge_equal_gaus=use_node_edge_equal_gaus,
+            equal_gaus_mean=equal_gaus_mean,
+            equal_gaus_std=equal_gaus_std,
+        )
+    else:
+        transforms_cfg = _build_ablation_transforms_config(
+            cfg.get("transforms"), ablation, ablation_seed
+        )
 
     preprocessor = PreProcessor(raw_dataset, dataset_dir, transforms_cfg)
     train_ds, val_ds, test_ds = preprocessor.load_dataset_splits(
@@ -321,6 +639,11 @@ def _run_one_ablation(
     ablation_seed: int,
     train_cfg: dict,
     extra_cfg_overrides: list[str] | None = None,
+    *,
+    ablation_family: str = "legacy",
+    sub_edges_frac: float = 0.75,
+    equal_gaus_mean: float = 0.0,
+    equal_gaus_std: float = 0.1,
 ) -> tuple[float | None, str, str]:
     """Train a fresh gpse_backbone and return (test_performance, monitor_metric, monitor_mode).
 
@@ -342,11 +665,29 @@ def _run_one_ablation(
     patience = int(train_cfg.get("patience", 20))
     seed = int(train_cfg.get("seed", 42))
 
-    cfg = _compose_cfg(dataset, model, pretraining, data_seed, extra_cfg_overrides)
+    cfg_overrides: list[str] = list(train_cfg.get("hyperparam_overrides") or [])
+    if extra_cfg_overrides:
+        cfg_overrides.extend(extra_cfg_overrides)
+
+    cfg = _compose_cfg(
+        dataset,
+        model,
+        pretraining,
+        data_seed,
+        cfg_overrides or None,
+    )
     monitor_metric, monitor_mode = _get_monitor(cfg)
 
     print(f"    [{ablation}] Building datamodule …")
-    datamodule = _build_ablation_datamodule(cfg, ablation, ablation_seed)
+    datamodule = _build_ablation_datamodule(
+        cfg,
+        ablation,
+        ablation_seed,
+        ablation_family=ablation_family,
+        sub_edges_frac=sub_edges_frac,
+        equal_gaus_mean=equal_gaus_mean,
+        equal_gaus_std=equal_gaus_std,
+    )
 
     print(f"    [{ablation}] Building fresh model …")
     fresh_model = _build_fresh_model(cfg)
@@ -464,6 +805,83 @@ def _compute_importance_scores(
     return feat_imp, struct_imp
 
 
+def _compute_importance_scores_new(
+    all_edge_all_feat: float | None,
+    no_edge_no_feat: float | None,
+    no_edge_all_feat: float | None,
+    all_edge_no_feat: float | None,
+    sub_edge_no_feat: float | None,
+    *,
+    higher_is_better: bool = True,
+) -> tuple[float | None, float | None]:
+    """Compute robust feature / structural importance (``_new`` definition).
+
+    Absolute zero: ``no_edge_no_feat`` (no structure, no informative features).
+
+    Feature importance — share of the zero→baseline gap recovered with real
+    features but no edges::
+
+        (P_no_edge_all_feat − P_no_edge_no_feat)
+        / (P_all_edge_all_feat − P_no_edge_no_feat)          [higher-is-better]
+
+    Structural importance — share of the zero→full-structure gap **lost** when
+    edges are subsampled (neutral features throughout)::
+
+        (P_all_edge_no_feat − P_sub_edge_no_feat)
+        / (P_all_edge_no_feat − P_no_edge_no_feat)            [higher-is-better]
+
+    For lower-is-better metrics both numerators and denominators are flipped so
+  that a larger score always means more importance.
+    """
+    if any(
+        v is None or (isinstance(v, float) and math.isnan(v))
+        for v in [
+            all_edge_all_feat,
+            no_edge_no_feat,
+            no_edge_all_feat,
+            all_edge_no_feat,
+            sub_edge_no_feat,
+        ]
+    ):
+        return None, None
+
+    zero = no_edge_no_feat
+
+    if higher_is_better:
+        feat_num = no_edge_all_feat - zero
+        feat_denom = all_edge_all_feat - zero
+        struct_num = all_edge_no_feat - sub_edge_no_feat
+        struct_denom = all_edge_no_feat - zero
+    else:
+        feat_num = zero - no_edge_all_feat
+        feat_denom = zero - all_edge_all_feat
+        struct_num = sub_edge_no_feat - all_edge_no_feat
+        struct_denom = zero - all_edge_no_feat
+
+    if abs(feat_denom) < 1e-8:
+        feat_imp = None
+    else:
+        feat_imp = float(max(0.0, min(1.0, feat_num / feat_denom)))
+
+    if abs(struct_denom) < 1e-8:
+        struct_imp = None
+    else:
+        struct_imp = float(max(0.0, min(1.0, struct_num / struct_denom)))
+
+    return feat_imp, struct_imp
+
+
+def _higher_is_better_from_json(existing: dict) -> bool | None:
+    """Infer metric direction from a dataset JSON payload."""
+    hp = existing.get(_BEST_HP_JSON_KEY)
+    if isinstance(hp, dict) and "higher_better" in hp:
+        return bool(hp["higher_better"])
+    mode = existing.get("gpse_backbone_monitor_mode")
+    if mode in ("max", "min"):
+        return mode == "max"
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
@@ -579,6 +997,154 @@ def compute_dataset_importance(
     )
     result["task_feature_importance"] = feat_imp
     result["task_structural_importance"] = struct_imp
+
+    return result
+
+
+def compute_dataset_importance_new(
+    dataset: str,
+    model: str,
+    pretraining: str,
+    data_seed: int,
+    train_cfg: dict,
+    ablation_seed: int = 42,
+    sub_edges_frac: float = 0.75,
+    equal_gaus_mean: float = 0.0,
+    equal_gaus_std: float = 0.1,
+    output_dir: Path | str | None = None,
+    use_best_test_baseline: bool = False,
+) -> dict:
+    """Run the new-definition ablation experiments for one dataset.
+
+    Unlike ``compute_dataset_importance``, this runs for *all* datasets
+    (including structural-feature datasets) with five ablations centred on
+    ``no_edge_no_feat`` as the absolute zero (see module docstring).
+
+    When *use_best_test_baseline* is ``True``, the baseline performance is
+    taken from ``GPSE_backbone_hyperparam_best_test.test_score`` in the
+    dataset JSON (no baseline training run).  Any ablation whose performance
+    key is already present in the JSON is skipped; importance scores are
+    always recomputed from the collected performances.
+
+    Returns
+    -------
+    dict
+        Top-level keys ready to be merged into the dataset JSON, including
+        ``task_feature_importance_new`` and ``task_structural_importance_new``.
+    """
+    dataset_name = dataset.split("/")[-1]
+    result: dict = {}
+    performances: dict[str, float | None] = {}
+    monitor_metric: str | None = None
+    monitor_mode: str | None = None
+
+    existing: dict = {}
+    if output_dir is not None:
+        existing = load_dataset_json(Path(output_dir), dataset_name)
+
+    # ── Baseline: tuned sweep best test score (preferred) or cached value ───
+    if use_best_test_baseline:
+        tuned_baseline = best_test_baseline_performance(
+            Path(output_dir), dataset_name
+        )
+        if tuned_baseline is not None:
+            performances["baseline"] = tuned_baseline
+            print(
+                f"  [{dataset_name}] baseline (new) → {tuned_baseline}  "
+                f"(from {_BEST_HP_JSON_KEY}.test_score, skipped training)"
+            )
+        hp = existing.get(_BEST_HP_JSON_KEY) or {}
+        if hp.get("monitor_metric"):
+            monitor_metric = f"val/{hp['monitor_metric']}"
+            monitor_mode = "max" if hp.get("higher_better", True) else "min"
+
+    if performances.get("baseline") is None:
+        cached_baseline = existing.get(NEW_PERF_KEYS["baseline"])
+        if cached_baseline is not None:
+            performances["baseline"] = float(cached_baseline)
+            print(
+                f"  [{dataset_name}] baseline (new) → {cached_baseline}  "
+                f"(cached, skipped training)"
+            )
+
+    ablations_to_run = [
+        a for a in NEW_ABLATION_TYPES if a not in performances
+    ]
+
+    for ablation in ablations_to_run:
+        perf_key = NEW_PERF_KEYS[ablation]
+        cached = existing.get(perf_key)
+        if cached is not None and not (
+            isinstance(cached, float) and math.isnan(cached)
+        ):
+            performances[ablation] = float(cached)
+            print(
+                f"  [{dataset_name}] {ablation} (new) → {cached}  "
+                f"(cached in JSON, skipped training)"
+            )
+            continue
+
+        t0 = time.perf_counter()
+        print(f"  [{dataset_name}] Running new ablation: {ablation} …")
+
+        try:
+            perf, mm, mmmode = _run_one_ablation(
+                dataset=dataset,
+                model=model,
+                pretraining=pretraining,
+                data_seed=data_seed,
+                ablation=ablation,
+                ablation_seed=ablation_seed,
+                train_cfg=train_cfg,
+                ablation_family="new",
+                sub_edges_frac=sub_edges_frac,
+                equal_gaus_mean=equal_gaus_mean,
+                equal_gaus_std=equal_gaus_std,
+            )
+            performances[ablation] = perf
+            if monitor_metric is None:
+                monitor_metric = mm
+                monitor_mode = mmmode
+            elapsed = time.perf_counter() - t0
+            print(
+                f"  [{dataset_name}] {ablation} (new) → {perf}  "
+                f"({elapsed:.1f}s, metric={mm})"
+            )
+        except Exception as exc:
+            import traceback
+            print(f"  [{dataset_name}] ERROR in new ablation={ablation}: {exc}")
+            traceback.print_exc()
+            performances[ablation] = None
+
+    if monitor_metric is None:
+        monitor_metric = existing.get("gpse_backbone_monitor_metric")
+        monitor_mode = existing.get("gpse_backbone_monitor_mode")
+
+    for ablation, key in NEW_PERF_KEYS.items():
+        result[key] = performances.get(ablation)
+
+    result["gpse_backbone_monitor_metric"] = monitor_metric
+    result["gpse_backbone_monitor_mode"] = monitor_mode
+
+    higher_is_better = _higher_is_better_from_json(existing)
+    if higher_is_better is None:
+        higher_is_better = monitor_mode != "min" if monitor_mode else True
+
+    feat_imp, struct_imp = _compute_importance_scores_new(
+        all_edge_all_feat=performances.get("baseline"),
+        no_edge_no_feat=performances.get("no_edge_no_feat"),
+        no_edge_all_feat=performances.get("no_edge_all_feat"),
+        all_edge_no_feat=performances.get("all_edge_no_feat"),
+        sub_edge_no_feat=performances.get("sub_edge_no_feat"),
+        higher_is_better=higher_is_better,
+    )
+    result["task_feature_importance_new"] = feat_imp
+    result["task_structural_importance_new"] = struct_imp
+
+    print(
+        f"  [{dataset_name}] importance_new recalculated → "
+        f"feature={feat_imp}  structural={struct_imp}"
+    )
 
     return result
 

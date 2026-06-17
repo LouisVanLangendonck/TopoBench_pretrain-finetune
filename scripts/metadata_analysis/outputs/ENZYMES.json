@@ -97,7 +97,7 @@
     "attribute_assortativity": 0.24652816699955005
   },
   "property_shift_strength_train_test": 0.025473063574300427,
-  "gpse_backbone_baseline_performance": 0.7572488188743591,
+  "gpse_backbone_baseline_performance": 0.7337258458137512,
   "gpse_backbone_random_features_performance": 0.5536158680915833,
   "gpse_backbone_shuffled_edges_performance": 0.570160448551178,
   "gpse_backbone_random_features_shuffled_edges_performance": 0.5138874053955078,
@@ -129,5 +129,11 @@
     "8": 0.744514524936676
   },
   "task_depth_monitor_metric": "val/auroc",
-  "task_depth_monitor_mode": "max"
+  "task_depth_monitor_mode": "max",
+  "gpse_backbone_no_edge_no_feat_performance": 0.5589626431465149,
+  "gpse_backbone_no_edge_all_feat_performance": 0.6045350432395935,
+  "gpse_backbone_all_edge_no_feat_performance": 0.612263560295105,
+  "gpse_backbone_sub_edge_no_feat_performance": 0.605499804019928,
+  "task_feature_importance_new": 0.26076656525831843,
+  "task_structural_importance_new": 0.12689755893545476
 }

@@ -97,7 +97,7 @@
     "attribute_assortativity": 0.14241808862338126
   },
   "property_shift_strength_train_test": 0.009427200652677197,
-  "gpse_backbone_baseline_performance": 0.7383512258529663,
+  "gpse_backbone_baseline_performance": 0.7491039633750916,
   "gpse_backbone_random_features_performance": 0.6917562484741211,
   "gpse_backbone_shuffled_edges_performance": 0.7634408473968506,
   "gpse_backbone_random_features_shuffled_edges_performance": 0.6630824208259583,
@@ -129,5 +129,11 @@
     "best_num_layers": 4,
     "best_weight_decay": 0,
     "best_lr": 0.01
-  }
+  },
+  "gpse_backbone_no_edge_no_feat_performance": 0.6917562484741211,
+  "gpse_backbone_no_edge_all_feat_performance": 0.7419354915618896,
+  "gpse_backbone_all_edge_no_feat_performance": 0.7491039633750916,
+  "gpse_backbone_sub_edge_no_feat_performance": 0.7311828136444092,
+  "task_feature_importance_new": 0.874999870080602,
+  "task_structural_importance_new": 0.312499805120903
 }
