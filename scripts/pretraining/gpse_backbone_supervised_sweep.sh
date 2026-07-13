@@ -11,9 +11,12 @@
 #     num_layers      : 2, 4, 6         (model.backbone.num_layers)
 #     weight_decay    : 0, 0.001        (optimizer.parameters.weight_decay)
 #     lr              : 0.001, 0.01     (optimizer.parameters.lr)
+#     pooling_type    : sum, mean       (model.readout.pooling_type)
 #
-# ESTIMATED RUNS (10 datasets × 3 hidden × 3 layers × 2 wd × 2 lr × 1 seed):
-#   10 × 3 × 3 × 2 × 2 = 360 total runs
+# ESTIMATED RUNS (per dataset):
+#   3 hidden × 3 layers × 2 wd × 2 lr × |pooling_types| × 1 seed
+#   Default pooling_types=(mean) → 72 runs per dataset
+#   Full pooling_types=(sum mean) → 144 runs per dataset
 #
 # CONCURRENCY: Uses "Virtual Slots" — N parallel jobs per GPU.
 # All runs log to a single W&B project named after this script.
@@ -146,6 +149,11 @@ gpse_num_layers=(2 4 6)              # model.backbone.num_layers
 weight_decays=(0 0.001)              # optimizer.parameters.weight_decay
 learning_rates=(0.001 0.01)          # optimizer.parameters.lr
 
+# --- Readout pooling sweep ---
+# Use (mean) to add mean-pooling runs alongside existing sum results.
+# Use (sum mean) for a full grid over both pooling types.
+pooling_types=(mean)                   # model.readout.pooling_type
+
 # --- Seeds ---
 DATA_SEEDS=(0)
 
@@ -246,6 +254,7 @@ sweep_dims=(
     "L|model.backbone.num_layers|${gpse_num_layers[*]}"
     "wd|optimizer.parameters.weight_decay|${weight_decays[*]}"
     "lr|optimizer.parameters.lr|${learning_rates[*]}"
+    "pool|model.readout.pooling_type|${pooling_types[*]}"
     "seed|dataset.split_params.data_seed|${DATA_SEEDS[*]}"
 )
 
@@ -316,6 +325,7 @@ while IFS=";" read -r run_name dynamic_args_str; do
             model.backbone.num_layers=*)          varied_params+=("++varied_param_num_layers=${arg#*=}") ;;
             optimizer.parameters.weight_decay=*)  varied_params+=("++varied_param_weight_decay=${arg#*=}") ;;
             optimizer.parameters.lr=*)            varied_params+=("++varied_param_lr=${arg#*=}") ;;
+            model.readout.pooling_type=*)         varied_params+=("++varied_param_pooling_type=${arg#*=}") ;;
             dataset.split_params.data_seed=*)     varied_params+=("++varied_param_data_seed=${arg#*=}") ;;
         esac
     done

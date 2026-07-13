@@ -55,6 +55,9 @@ class TestConfigResolvers:
         out = get_default_metrics("regression")
         assert out == ["mse", "mae"]
 
+        out = get_default_metrics("multilabel classification")
+        assert out == ["ap"]
+
         with pytest.raises(ValueError, match="Invalid task") as e:
             get_default_metrics("some_task")
 

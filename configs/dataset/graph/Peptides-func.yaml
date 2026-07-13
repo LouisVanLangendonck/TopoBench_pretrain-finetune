@@ -1,27 +1,27 @@
-
 loader:
-  _target_: topobench.data.loaders.OGBGDatasetLoader
+  _target_: topobench.data.loaders.LRGBDatasetLoader
   parameters:
     data_domain: graph
-    data_type: OGBGDataset
-    data_name: ogbg-molpcba
+    data_type: LRGBDataset
+    data_name: Peptides-func
     data_dir: ${paths.data_dir}/${dataset.loader.parameters.data_domain}/${dataset.loader.parameters.data_type}
 
 # Dataset parameters
 parameters:
   num_features: 9
-  num_classes: 128
+  num_classes: 10
   task: multilabel classification
   loss_type: BCE
   monitor_metric: ap
   task_level: graph
+  preserve_edge_attr_if_lifted: True
 
 #splits
 split_params:
   learning_setting: inductive
   data_split_dir: ${paths.data_dir}/data_splits/${dataset.loader.parameters.data_name}
   data_seed: 0
-  split_type: "fixed" #'k-fold' # either "k-fold" or "random" strategies
+  split_type: "fixed"
   k: 10 # for "k-fold" Cross-Validation
   train_prop: 0.5 # for "random" strategy splitting
 

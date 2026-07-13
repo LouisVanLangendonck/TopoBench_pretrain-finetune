@@ -19,24 +19,24 @@
 # Mirror the list in scripts/pretraining/gin_pretrain_sweep.sh; comment out
 # any datasets you want to skip.
 datasets:
-  # - "graph/BBB_Martins"
-  # - "graph/CYP3A4_Veith"
-  # - "graph/ogbg-molhiv"
-  # #- "graph/MUTAG"
-  # - "graph/PROTEINS"
-  # - "graph/Caco2_Wang"
-  # - "graph/Clearance_Hepatocyte_AZ"
-  # # - "graph/ogbg-molbace"
-  # - "graph/IMDB-BINARY"
-  # - "graph/REDDIT-BINARY"
-  # - "graph/PPBR_AZ"
-  # - "graph/CYP2C9_Veith"
-  # - "graph/Clearance_Microsome_AZ"
-  # - "graph/DD"
-  # - "graph/ENZYMES"
+  - "graph/BBB_Martins"
+  - "graph/CYP3A4_Veith"
+  - "graph/ogbg-molhiv"
+  # - "graph/MUTAG"
+  - "graph/PROTEINS"
+  - "graph/Caco2_Wang"
+  - "graph/Clearance_Hepatocyte_AZ"
+  # - "graph/ogbg-molbace"
+  - "graph/IMDB-BINARY"
+  - "graph/REDDIT-BINARY"
+  - "graph/PPBR_AZ"
+  - "graph/CYP2C9_Veith"
+  - "graph/Clearance_Microsome_AZ"
+  - "graph/DD"
+  - "graph/ENZYMES"
   #- "graph/COLLAB"
-  # - "graph/Solubility_AqSolDB"
-  - "graph/deezer_ego_nets"
+  - "graph/Solubility_AqSolDB"
+  # - "graph/deezer_ego_nets"
 
 
 # ── Model / pretraining (controls which pre_transforms are applied) ────────────
@@ -117,8 +117,9 @@ features:
 importance_analysis:
 
   # ── Which analyses to run ────────────────────────────────────────────────────
-  feature_and_structural_importance: true  # 4-ablation run (baseline / rand-feat / shuffled-edges / both)
-  task_depth: true                           # layer-sweep run (1..task_depth_max_layers)
+  feature_and_structural_importance: false  # 4-ablation run (baseline / rand-feat / shuffled-edges / both)
+  feature_and_structural_importance_new: true  # 5-ablation run (see formulas below)
+  task_depth: false                           # layer-sweep run (1..task_depth_max_layers)
 
   # ── Model / pretraining (supervised fine-tuning, no pretraining) ────────────
   model: "graph/gpse_backbone"
@@ -126,10 +127,24 @@ importance_analysis:
 
   # ── Training hyperparameters ────────────────────────────────────────────────
   max_epochs:   400
-  patience:     20
+  patience:     10
   train_seed:   42          # RNG seed for model init + optimiser
-  ablation_seed: 42         # seed for RandomizeNodeFeatures / ShuffleEdges transforms
+  ablation_seed: 42         # seed for RandomizeNodeFeatures / ShuffleEdges / SubsampleEdges transforms
   device: "cuda:0"          # override with "cuda:0" for GPU
+  use_best_hyperparams: true  # load hidden/layers/wd/lr from GPSE_backbone_hyperparam_best_test;
+                              # baseline for *_new importance uses test_score from same block
+
+  # ── New importance definition (feature_and_structural_importance_new) ────────
+  # Absolute zero: no_edge_no_feat (no edges + equal Gaussian features).
+  # feature_importance_new    = (P_no_edge_all_feat - P_no_edge_no_feat)
+  #                             / (P_baseline - P_no_edge_no_feat)
+  # structural_importance_new = (P_all_edge_no_feat - P_sub_edge_no_feat)
+  #                             / (P_all_edge_no_feat - P_no_edge_no_feat)
+  # Signs flip automatically for lower-is-better metrics (e.g. MAE).
+  # Runs for ALL datasets (ignores structural_feature_datasets below).
+  sub_edges_frac: 0.75       # fraction of edges in sub_edge_no_feat ablation
+  equal_gaus_mean: 0.0
+  equal_gaus_std: 0.1
 
   # ── Task-depth sweep ─────────────────────────────────────────────────────────
   # Trains baseline (real features + real structure) with num_layers ∈ [1, max].

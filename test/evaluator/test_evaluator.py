@@ -132,19 +132,48 @@ class TestTBEvaluator:
         with pytest.raises(ValueError, match="Invalid task"):
             TBEvaluator(task="wrong_task", num_classes=2, metrics=["accuracy"])
 
-    def test_multilabel_not_implemented(self):
-        """Test that multilabel classification raises NotImplementedError."""
+    def test_multilabel_update_and_compute(self):
+        """Test multilabel classification with mean AP."""
         evaluator = TBEvaluator(
             task="multilabel classification",
             num_classes=3,
-            metrics=["accuracy"]
+            metrics=["ap"],
         )
 
-        with pytest.raises(NotImplementedError, match="Multilabel classification"):
-            evaluator.update({
-                "logits": torch.tensor([[1, 0, 0], [0, 1, 1]]),
-                "labels": torch.tensor([[1, 1, 0], [0, 1, 1]])
-            })
+        logits = torch.tensor([[2.0, -2.0, 0.0], [-2.0, 2.0, 0.0], [0.0, -2.0, 2.0]])
+        labels = torch.tensor([[1.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]])
+
+        evaluator.update({"logits": logits, "labels": labels})
+        out = evaluator.compute()
+
+        assert "ap" in out
+        assert out["ap"] == pytest.approx(1.0, abs=0.01)
+
+    def test_multilabel_ap_ignores_nan_labels(self):
+        """Test that NaN targets are ignored when computing multilabel AP."""
+        evaluator = TBEvaluator(
+            task="multilabel classification",
+            num_classes=2,
+            metrics=["ap"],
+        )
+
+        logits = torch.tensor([[2.0, -2.0], [-2.0, 2.0]])
+        labels = torch.tensor([[1.0, float("nan")], [0.0, 1.0]])
+
+        evaluator.update({"logits": logits, "labels": labels})
+        out = evaluator.compute()
+
+        assert "ap" in out
+        assert out["ap"] == pytest.approx(1.0, abs=0.01)
+
+    def test_multilabel_unsupported_metric(self):
+        """Test error handling for unsupported multilabel metrics."""
+        with pytest.raises(ValueError, match="Unsupported multilabel metric"):
+            TBEvaluator(
+                task="multilabel classification",
+                num_classes=3,
+                metrics=["accuracy"],
+            )
 
     def test_reset(self):
         """Test the reset method."""

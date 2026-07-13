@@ -9,10 +9,10 @@
 #   random-init-full   randomise ALL weights; train everything
 #   random-init-probe  randomise ALL weights; freeze encoder; train readout only
 modes:
-  # - finetune-full
-  # - finetune-probe
-  - random-init-full
-  - random-init-probe
+  - finetune-full
+  - finetune-probe
+  # - random-init-full
+  # - random-init-probe
 
 # ── Few-shot fractions of training data ───────────────────────────────────────
 fractions:
@@ -147,11 +147,16 @@ projects:
   # - gpse_backbone_pretrain_sweep_graphcl_PROTEINS
   # - gpse_backbone_pretrain_sweep_bgrl_PROTEINS
   # - gpse_backbone_pretrain_sweep_vgae_PROTEINS
-  - gpse_backbone_pretrain_sweep_graphmaev2_deezer_ego_nets
+  # - gpse_backbone_pretrain_sweep_graphmaev2_deezer_ego_nets
   # - gpse_backbone_pretrain_sweep_dgi_deezer_ego_nets
   # - gpse_backbone_pretrain_sweep_graphcl_deezer_ego_nets
   # - gpse_backbone_pretrain_sweep_bgrl_deezer_ego_nets
   # - gpse_backbone_pretrain_sweep_vgae_deezer_ego_nets
+  - gpse_backbone_pretrain_sweep_graphmaev2_Peptides-func
+  - gpse_backbone_pretrain_sweep_dgi_Peptides-func
+  - gpse_backbone_pretrain_sweep_graphcl_Peptides-func
+  - gpse_backbone_pretrain_sweep_bgrl_Peptides-func
+  - gpse_backbone_pretrain_sweep_vgae_Peptides-func
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 # Number of concurrent GPU workers.  Set to the number of available GPUs.

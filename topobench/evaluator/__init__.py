@@ -15,6 +15,7 @@ from torchmetrics.regression import (
 )
 
 from .metrics import ExampleRegressionMetric
+from .metrics.multilabel_ap import MultilabelMeanAveragePrecision
 
 # Define metrics
 METRICS = {
@@ -31,6 +32,7 @@ METRICS = {
     "rmse": MeanSquaredError,  # We'll configure this with squared=False
     "r2": R2Score,
     "example": ExampleRegressionMetric,
+    "ap": MultilabelMeanAveragePrecision,
 }
 
 from .base import AbstractEvaluator  # noqa: E402

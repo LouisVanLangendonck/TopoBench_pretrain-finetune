@@ -773,7 +773,9 @@ def get_default_metrics(task, metrics=None):
     if metrics is not None:
         return metrics
     else:
-        if "classification" in task:
+        if task == "multilabel classification":
+            return ["ap"]
+        elif "classification" in task:
             return ["accuracy", "precision", "recall", "auroc"]
         elif "regression" in task:
             return ["mse", "mae"]

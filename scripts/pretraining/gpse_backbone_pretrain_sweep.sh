@@ -137,7 +137,7 @@ datasets=(
     # "graph/COLLAB"
     # "graph/IMDB-BINARY"
     # "graph/Solubility_AqSolDB"
-    "graph/deezer_ego_nets"
+    "graph/Peptides-func"
 )
 
 # --- GSPE_backbone architecture hyperparameters (shared across all methods) ---
@@ -169,7 +169,7 @@ FIXED_ARGS=(
     "model.feature_encoder.proj_dropout=0.2"
     "trainer.min_epochs=10"
     "trainer.check_val_every_n_epoch=2"
-    "callbacks.early_stopping.patience=15"
+    "callbacks.early_stopping.patience=10"
 )
 
 
